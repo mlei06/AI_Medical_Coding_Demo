@@ -1,3 +1,0 @@
-dataset_path:  explainable_medical_coding/datasets/mimiciv_icd10.py
-target_columns: ["diagnosis_codes", "procedure_codes"]
-max_length: 6000

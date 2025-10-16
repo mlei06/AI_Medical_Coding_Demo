@@ -1,6 +1,0 @@
-name: PLMICD
-autoregressive: false
-configs:
-  model_path: Maltehb/danish-bert-botxo
-  chunk_size: 128
-  cross_attention: false
