@@ -1,0 +1,21 @@
+Chief Complaint: Routine diabetes follow-up.
+
+History of Present Illness:
+A 55-year-old woman with longstanding type 2 diabetes mellitus presents for routine follow-up. She reports adherence to metformin 1000 mg BID and semaglutide weekly. Home glucose readings average 140-160 mg/dL. She denies hypoglycemic episodes. She reports tingling in both feet worsening over the past 3 months.
+
+Physical Exam:
+BP 132/78, BMI 31 kg/m². Sensation diminished to monofilament testing in bilateral feet. No foot ulcers or skin breakdown.
+
+Labs:
+HbA1c 7.8% (prior 7.2%). Microalbumin/creatinine ratio 45 mg/g. LDL 118 mg/dL.
+
+Assessment:
+- Type 2 diabetes mellitus with suboptimal control
+- Diabetic peripheral neuropathy
+- Early diabetic nephropathy (microalbuminuria)
+
+Plan:
+Intensify lifestyle interventions; increase semaglutide to 1 mg weekly.
+Initiate gabapentin 300 mg nightly for neuropathy.
+Start lisinopril 10 mg daily for renal protection.
+Refer to podiatry for regular foot care.
