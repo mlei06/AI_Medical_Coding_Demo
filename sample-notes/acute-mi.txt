@@ -1,0 +1,17 @@
+Chief Complaint: Chest pain and shortness of breath.
+
+History of Present Illness:
+The patient is a 62-year-old male with a history of hypertension and type 2 diabetes who presents with crushing substernal chest pain radiating to the left arm. Symptoms began 90 minutes prior to arrival. He reports associated diaphoresis and nausea.
+
+ED Course:
+EKG revealed ST elevations in leads II, III, and aVF consistent with an inferior STEMI. Troponin-I was elevated at 3.5 ng/mL. The patient was taken emergently to the cath lab and underwent successful PCI with insertion of a drug-eluting stent in the right coronary artery.
+
+Assessment:
+- ST elevation myocardial infarction (inferior wall)
+- Hypertension
+- Type 2 diabetes mellitus
+
+Plan:
+Admit to CCU for post-PCI monitoring.
+Initiate dual antiplatelet therapy (aspirin + ticagrelor) and high-intensity statin.
+Start beta blocker and ACE inhibitor once hemodynamically stable.
