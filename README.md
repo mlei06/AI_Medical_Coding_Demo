@@ -12,7 +12,11 @@ A FastAPI service for explainable medical code prediction using pre-trained lang
 ## Getting Started
 
 1. **Download models**  
-   Follow the instructions in `models/` to obtain the required checkpoints before running the API.
+   Use the helper script to pull the packaged checkpoints with gdown:
+   ```bash
+   poetry run python scripts/download_models.py --id 1FDSBdX3qgDGeNxOUDNm-3YGQrZZhBOqV
+   ```
+   The archive is extracted into `models/`; ensure the RoBERTa base tokenizer and at least one fine-tuned model are available before starting the API.
 2. **Run the upstream API**  
    Docker
    ```bash

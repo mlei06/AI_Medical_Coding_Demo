@@ -1,4 +1,4 @@
-from test_explainer import predict_explain as run_prediction
+from utils.explainer_service import EXPLAIN_METHODS, predict_explain as run_prediction
 import logging
 from fastapi import FastAPI
 from typing import List, Optional
@@ -45,20 +45,6 @@ class PredictRequest(BaseModel):
     confidence_threshold: Optional[float] = 0.5
 
 logger = logging.getLogger(__name__)
-
-EXPLAIN_METHODS = [
-    "grad_attention",
-    "atgrad_attention",
-    "laat",
-    "attention_rollout",
-    "deeplift",
-    "gradient_x_input",
-    "integrated_gradient",
-    "occlusion",
-    "kernelshap",
-    "lime",
-    "random",
-]
 
 BLACKLISTED_MODELS = {"roberta-base-pm-m3-voc-hf", "README.md"}
 
