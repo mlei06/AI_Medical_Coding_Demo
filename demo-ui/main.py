@@ -107,6 +107,11 @@ async def predict(request: Request):
     return await _proxy_request("POST", "predict-explain", request, include_body=True)
 
 
+@app.post("/predict-explain-llm")
+async def predict_llm(request: Request):
+    return await _proxy_request("POST", "predict-explain-llm", request, include_body=True)
+
+
 @app.get("/description.json")
 async def proxy_description(request: Request):
     return await _proxy_request("GET", "description.json", request)

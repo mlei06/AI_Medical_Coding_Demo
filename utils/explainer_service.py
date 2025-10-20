@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -14,6 +15,10 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import torch
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
+
+MODULE_ROOT = Path(__file__).resolve().parent
+if str(MODULE_ROOT) not in sys.path:
+    sys.path.insert(0, str(MODULE_ROOT))
 
 from explainable_medical_coding.config.factories import get_explainability_method
 from explainable_medical_coding.utils.analysis import predict

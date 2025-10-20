@@ -89,7 +89,8 @@ body {
 }
 
 .dropdown select,
-.dropdown input[type="number"] {
+.dropdown input[type="number"],
+.dropdown input[type="text"] {
     min-width: 12rem;
     padding: 0.5rem 0.75rem;
     border-radius: 10px;
@@ -587,7 +588,8 @@ body {
     }
 
     .dropdown select,
-    .dropdown input[type="number"] {
+    .dropdown input[type="number"],
+    .dropdown input[type="text"] {
         width: 100%;
     }
 

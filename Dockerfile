@@ -12,13 +12,11 @@ RUN apt-get update && apt-get install -y \
 COPY . .
 
 # Install poetry and run setup
-RUN pip install poetry
-RUN poetry config virtualenvs.in-project true
-RUN poetry install
+RUN pip install -r requirements.txt
 
 
 # Expose port
 EXPOSE 8084
 
 # Run the API
-CMD ["poetry", "run", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8084"]
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8084"]

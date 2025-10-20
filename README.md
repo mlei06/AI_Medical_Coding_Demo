@@ -12,26 +12,33 @@ A FastAPI service for explainable medical code prediction using pre-trained lang
 ## Getting Started
 
 1. **Download models**  
-   Use the helper script to pull the packaged checkpoints with gdown:
    ```bash
-   poetry run python scripts/download_models.py --id 1FDSBdX3qgDGeNxOUDNm-3YGQrZZhBOqV
-   ```
-   The archive is extracted into `models/`; ensure the RoBERTa base tokenizer and at least one fine-tuned model are available before starting the API.
-2. **Run the upstream API**  
-   Docker
-   ```bash
-   # Build the image
-   docker build -t explainable-medical-coding .
+   wget https://dl.fbaipublicfiles.com/biolm/RoBERTa-base-PM-M3-Voc-hf.tar.gz -P models
+   tar -xvzf models/RoBERTa-base-PM-M3-Voc-hf.tar.gz -C models
+   rm models/RoBERTa-base-PM-M3-Voc-hf.tar.gz
+   mv models/RoBERTa-base-PM-M3-Voc/RoBERTa-base-PM-M3-Voc-hf models/roberta-base-pm-m3-voc-hf
+   rm -r models/RoBERTa-base-PM-M3-Voc
 
-   # Run the container 
+   gdown --id 1ilNUITkGlGYWj4a_ZOaWbkOx2io6aPAq -O models/temp.tar.gz
+   tar -xvzf models/temp.tar.gz -C models
+   rm models/temp.tar.gz
+   ```
+
+2. **Run the upstream API**  
+   **Docker**
+   ```bash
+   docker build -t explainable-medical-coding .
    docker run -d --name ml-service -p 8084:8084 explainable-medical-coding
    ```
-   Local Developement:
+
+   **Local Development (Python 3.11.5)**
    ```bash
-   pip install poetry
-   poetry install
-   poetry run uvicorn api:app --reload --port 8084
+   python -m venv venv
+   source venv/bin/activate          # Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   uvicorn api:app --reload --port 8084
    ```
+
    The API will be available at `http://localhost:8084`. Visit `/docs` for interactive OpenAPI documentation.
 
 ## Helper Tools
@@ -48,7 +55,7 @@ python curl_api_test.py
 
 The demo UI is a lightweight FastAPI bridge plus static frontend that proxies requests to the upstream API so you can iterate quickly without reloading the heavy model stack.
 
-1. **Start the upstream API** (Docker command above or `poetry run uvicorn api:app --reload --port 8084`)
+1. **Start the upstream API** (Docker command above or `uvicorn api:app --reload --port 8084`)
 2. **Install UI bridge dependencies** (one-time):
    ```bash
    pip install -r demo-ui/requirements.txt
@@ -57,12 +64,11 @@ The demo UI is a lightweight FastAPI bridge plus static frontend that proxies re
    ```bash
    uvicorn demo-ui.main:app --reload --port 8090
    ```
-4. Visit `http://localhost:8090/` to use the interface. Drag-and-drop notes from `sample-notes/`, inspect AI-suggested codes with token highlights, curate a finalized list, and export results. Finalized outputs are written under `demo-ui/output/` in per-note folders.
+4. Visit `http://localhost:8090/` to use the interface. Drag-and-drop notes from `data/sample-notes/`, inspect AI-suggested codes with token highlights, curate a finalized list, and export results. Finalized outputs are written under `demo-ui/output/` in per-note folders.
 
 ## Project Structure Highlights
 
-- `api.py` � FastAPI application exposing `/predict-explain`, `/models`, and `/explain-methods`.
-- `curl_api_test.py` � Interactive command-line tester for the API.
-- `demo-ui/` � Self-contained proxy UI (FastAPI bridge + static frontend assets).
-- `sample-notes/` � Example clinical notes for quick testing.
-- `models/` � Expected location for downloaded model checkpoints.
+- `api.py` – FastAPI application exposing `/predict-explain`, `/models`, and `/explain-methods`.
+- `curl_api_test.py` – Interactive command-line tester for the API.
+- `demo-ui/` – Self-contained proxy UI (FastAPI bridge + static frontend assets).
+- `models/` – Expected location for downloaded model checkpoints.

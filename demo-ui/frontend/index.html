@@ -18,15 +18,26 @@
                 </div>
             </div>
             <div class="header-actions">
-                <label class="dropdown">
+                <label class="dropdown" id="modeSelectWrapper">
+                    <span>Engine</span>
+                    <select id="modeSelect">
+                        <option value="local">Local Model</option>
+                        <option value="llm">LLM (OpenAI)</option>
+                    </select>
+                </label>
+                <label class="dropdown hidden" id="llmModelWrapper">
+                    <span>LLM Model</span>
+                    <input id="llmModelInput" type="text" placeholder="Leave blank for default">
+                </label>
+                <label class="dropdown" id="modelSelectWrapper">
                     <span>Model</span>
                     <select id="modelSelect"></select>
                 </label>
-                <label class="dropdown">
+                <label class="dropdown" id="methodSelectWrapper">
                     <span>Explainability</span>
                     <select id="methodSelect"></select>
                 </label>
-                <label class="dropdown">
+                <label class="dropdown" id="thresholdWrapper">
                     <span>Confidence ≥</span>
                     <input id="thresholdInput" type="number" min="0" max="1" step="0.05" value="0.5">
                 </label>

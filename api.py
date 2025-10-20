@@ -1,11 +1,14 @@
-from utils.explainer_service import EXPLAIN_METHODS, predict_explain as run_prediction
 import logging
-from fastapi import FastAPI
-from typing import List, Optional
-from pydantic import BaseModel
-import uvicorn
 import os
 from pathlib import Path
+from typing import List, Optional
+
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
+
+from utils.explainer_service import EXPLAIN_METHODS, predict_explain as run_prediction
+from utils.llm_explainer import LLMGenerationError, predict_codes_with_llm
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -43,6 +46,26 @@ class PredictRequest(BaseModel):
     explain_method: Optional[str] = "grad_attention"
     model: Optional[str] = None
     confidence_threshold: Optional[float] = 0.5
+
+
+class LlmOptions(BaseModel):
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    max_output_tokens: Optional[int] = Field(default=None, ge=1, le=4096)
+    max_tokens: Optional[int] = Field(default=None, ge=1, le=4096)
+    max_completion_tokens: Optional[int] = Field(default=None, ge=1, le=4096)
+    presence_penalty: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
+    frequency_penalty: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
+    reasoning_effort: Optional[str] = Field(default=None)
+    model_config = ConfigDict(extra="forbid")
+
+
+class LlmPredictRequest(BaseModel):
+    note: str
+    model_name: Optional[str] = Field(default=None, alias="model")
+    options: Optional[LlmOptions] = None
+
+    model_config = ConfigDict(populate_by_name=True)
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +119,31 @@ def predict_explain(body: PredictRequest):
         return {
             "error": f"Model directory '{requested_model}' not found."
         }
-
+    logger.info(f"Explain method: {body.explain_method}")
+    logger.info(f"Model: {resolved_model}")
+    logger.info(f"Confidence threshold: {body.confidence_threshold}")
     result = run_prediction(
         text=body.note, 
         method=body.explain_method, 
         model=resolved_model,
         confidence_threshold=body.confidence_threshold
     )
+    return result
+
+
+@app.post("/predict-explain-llm")
+def predict_explain_with_llm(body: LlmPredictRequest):
+    extras = body.options.model_dump(exclude_none=True) if body.options else None
+    try:
+        result = predict_codes_with_llm(
+            note=body.note,
+            model_name=body.model_name,
+            extras=extras,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except LLMGenerationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
     return result
 
 @app.get("/models")

@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 MODELS_ROOT = SCRIPT_DIR / "models"
@@ -25,23 +25,27 @@ DISPLAY_ROOT = Path("models")
 BLACKLISTED_MODELS = {"roberta-base-pm-m3-voc-hf"}
 
 DEFAULT_NOTE = (
-    "DISCHARGE SUMMARY\n\n"
-    "HISTORY OF PRESENT ILLNESS:\n"
-    "The patient is a 65-year-old male with a history of diabetes mellitus type 2 "
-    "and hypertension who presented to the emergency department with chest pain "
-    "and shortness of breath. The patient reported onset of symptoms approximately "
-    "2 hours prior to arrival. EKG showed ST elevations in leads II, III, and aVF "
-    "consistent with inferior wall myocardial infarction.\n\n"
-    "HOSPITAL COURSE:\n"
-    "The patient was taken emergently to the cardiac catheterization lab where "
-    "he underwent primary percutaneous coronary intervention. A drug-eluting stent "
-    "was placed in the right coronary artery. Post-procedure, the patient was "
-    "stable and transferred to the cardiac care unit for monitoring.\n\n"
-    "DISCHARGE DIAGNOSES:\n"
-    "1. ST-elevation myocardial infarction, inferior wall\n"
-    "2. Diabetes mellitus type 2, uncontrolled\n"
-    "3. Essential hypertension\n"
-)
+"""
+Chief Complaint: Chest pain and shortness of breath.
+
+History of Present Illness:
+The patient is a 62-year-old male with a history of hypertension and type 2 diabetes who presents with crushing substernal chest pain radiating to the left arm. Symptoms began 90 minutes prior to arrival. He reports associated diaphoresis and nausea.
+
+ED Course:
+EKG revealed ST elevations in leads II, III, and aVF consistent with an inferior STEMI. Troponin-I was elevated at 3.5 ng/mL. The patient was taken emergently to the cath lab and underwent successful PCI with insertion of a drug-eluting stent in the right coronary artery.
+
+Assessment:
+- ST elevation myocardial infarction (inferior wall)
+- Hypertension
+- Type 2 diabetes mellitus
+
+Plan:
+Admit to CCU for post-PCI monitoring.
+Initiate dual antiplatelet therapy (aspirin + ticagrelor) and high-intensity statin.
+Start beta blocker and ACE inhibitor once hemodynamically stable.
+
+""" )
+
 
 EXPLAIN_METHODS = [
     "grad_attention",
@@ -130,27 +134,45 @@ def prompt_note() -> str:
     return note or DEFAULT_NOTE
 
 
-def call_api(note: str, model: str, method: str, confidence_threshold: float) -> Optional[dict]:
+def call_api(
+    *,
+    note: str,
+    use_llm: bool,
+    model: Optional[str] = None,
+    method: Optional[str] = None,
+    confidence_threshold: Optional[float] = None,
+    llm_model: Optional[str] = None,
+    llm_options: Optional[dict] = None,
+) -> Optional[dict]:
     """Invoke the FastAPI endpoint via curl and return the parsed JSON."""
-    payload = json.dumps(
-        {
+    if use_llm:
+        endpoint = "http://localhost:8084/predict-explain-llm"
+        payload: dict[str, Any] = {"note": note}
+        if llm_model:
+            payload["model"] = llm_model
+        if llm_options:
+            payload["options"] = llm_options
+    else:
+        endpoint = "http://localhost:8084/predict-explain"
+        payload = {
             "note": note,
             "model": model,
             "explain_method": method,
             "confidence_threshold": confidence_threshold,
         }
-    )
+
+    serialized_payload = json.dumps(payload)
 
     cmd = [
         "curl",
         "-s",
         "-X",
         "POST",
-        "http://localhost:8084/predict-explain",
+        endpoint,
         "-H",
         "Content-Type: application/json",
         "-d",
-        payload,
+        serialized_payload,
     ]
 
     try:
@@ -183,58 +205,136 @@ def display_results(result: dict) -> None:
         print(f"\nAPI error: {result['error']}")
         return
 
+    reasoning = result.get("reasoning")
+    if isinstance(reasoning, str) and reasoning.strip():
+        print("\nLLM Reasoning:")
+        print(reasoning.strip())
+
     icd_codes = result.get("icd_codes") or []
     if not icd_codes:
         print("\nNo ICD codes returned.")
-        return
+    else:
+        print("\nICD Codes:")
+        is_llm_payload = any("evidence_spans" in entry for entry in icd_codes)
 
-    print("\nICD Codes:")
-    for entry in icd_codes:
-        code = entry.get("code", "<unknown>")
-        description = entry.get("description") or ""
-        probability = entry.get("probability")
-        probability_text = f"{probability:.4f}" if isinstance(probability, (float, int)) else "n/a"
-        print(f"\nCode: {code}")
-        print(f"Description: {description}")
-        print(f"Probability: {probability_text}")
+        for entry in icd_codes:
+            code = entry.get("code", "<unknown>")
+            description = entry.get("description") or ""
+            probability = entry.get("probability")
+            probability_text = (
+                f"{probability:.4f}" if isinstance(probability, (float, int)) else "n/a"
+            )
 
-        tokens = entry.get("explanation", {}).get("tokens") or []
-        if not tokens:
-            print("Top tokens: (none)")
-            continue
+            print(f"\nCode: {code}")
+            print(f"Description: {description}")
+            if not is_llm_payload:
+                print(f"Probability: {probability_text}")
 
-        print("Top tokens:")
-        for token_info in tokens:
-            rank = token_info.get("rank")
-            display_rank = f"{int(rank)}." if isinstance(rank, (int, float)) else "-"
-            token = token_info.get("token", "<unk>")
-            attribution = token_info.get("attribution")
-            attr_text = f"{attribution:.4f}" if isinstance(attribution, (float, int)) else "n/a"
-            print(f"  {display_rank} {token} ({attr_text})")
+            if is_llm_payload:
+                explanation = entry.get("explanation") or ""
+                if explanation:
+                    print(f"Explanation: {explanation}")
+                spans = entry.get("evidence_spans") or []
+            else:
+                explanation = entry.get("explanation") or {}
+                spans = explanation.get("spans") or []
+                tokens = explanation.get("tokens") or []
+                if tokens:
+                    print("Top tokens:")
+                    for token_info in tokens:
+                        rank = token_info.get("rank")
+                        display_rank = (
+                            f"{int(rank)}." if isinstance(rank, (int, float)) else "-"
+                        )
+                        token = token_info.get("token", "<unk>")
+                        attribution = token_info.get("attribution")
+                        attr_text = (
+                            f"{attribution:.4f}"
+                            if isinstance(attribution, (float, int))
+                            else "n/a"
+                        )
+                        print(f"  {display_rank} {token} ({attr_text})")
+
+            if spans:
+                print("Evidence spans:")
+                for span in spans:
+                    start = span.get("start")
+                    end = span.get("end")
+                    text = span.get("text", "")
+                    if isinstance(start, int) and isinstance(end, int) and start >= 0:
+                        print(f"  [{start}-{end}] {text}")
+                    else:
+                        print(f"  {text}")
+
+    cpt_codes = result.get("cpt_codes") or []
+    if cpt_codes:
+        print("\nCPT Codes:")
+        for entry in cpt_codes:
+            code = entry.get("code", "<unknown>")
+            description = entry.get("description") or ""
+            explanation = entry.get("explanation") or ""
+            print(f"\nCode: {code}")
+            print(f"Description: {description}")
+            if explanation:
+                print(f"Explanation: {explanation}")
+            spans = entry.get("evidence_spans") or []
+            if spans:
+                print("Evidence spans:")
+                for span in spans:
+                    start = span.get("start")
+                    end = span.get("end")
+                    text = span.get("text", "")
+                    if isinstance(start, int) and isinstance(end, int) and start >= 0:
+                        print(f"  [{start}-{end}] {text}")
+                    else:
+                        print(f"  {text}")
 
 
 def main() -> None:
-    available_models = discover_models(MODELS_ROOT)
-    selected_model = prompt_selection(available_models, "Model")
-
-    selected_method = prompt_selection(EXPLAIN_METHODS, "Explainability Method")
+    use_llm_input = input("Use OpenAI LLM endpoint? [y/N]: ").strip().lower()
+    use_llm = use_llm_input == "y"
 
     note = prompt_note()
 
-    threshold_input = input("\nConfidence threshold (default 0.4): ").strip()
-    try:
-        confidence_threshold = float(threshold_input) if threshold_input else 0.4
-    except ValueError:
-        print("Invalid threshold. Using default 0.5.")
-        confidence_threshold = 0.5
+    if use_llm:
+        llm_model = input("\nLLM model name (press Enter for server default): ").strip() or None
+        llm_options: Optional[dict] = None
+        options_input = input(
+            "Optional LLM options JSON (e.g., {\"max_output_tokens\": 1200}). Leave blank to skip: "
+        ).strip()
+        if options_input:
+            try:
+                llm_options = json.loads(options_input)
+            except json.JSONDecodeError:
+                print("Invalid JSON for LLM options; ignoring.")
+        print("\nSending request to LLM endpoint...")
+        response = call_api(
+            note=note,
+            use_llm=True,
+            llm_model=llm_model,
+            llm_options=llm_options,
+        )
+    else:
+        available_models = discover_models(MODELS_ROOT)
+        selected_model = prompt_selection(available_models, "Model")
+        selected_method = prompt_selection(EXPLAIN_METHODS, "Explainability Method")
 
-    print("\nSending request...")
-    response = call_api(
-        note=note,
-        model=selected_model,
-        method=selected_method,
-        confidence_threshold=confidence_threshold,
-    )
+        threshold_input = input("\nConfidence threshold (default 0.4): ").strip()
+        try:
+            confidence_threshold = float(threshold_input) if threshold_input else 0.4
+        except ValueError:
+            print("Invalid threshold. Using default 0.5.")
+            confidence_threshold = 0.5
+
+        print("\nSending request to local model endpoint...")
+        response = call_api(
+            note=note,
+            use_llm=False,
+            model=selected_model,
+            method=selected_method,
+            confidence_threshold=confidence_threshold,
+        )
+
     if response is None:
         sys.exit(1)
 
