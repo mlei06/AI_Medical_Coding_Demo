@@ -7,6 +7,9 @@ const state = {
     finalizedCodes: [],
     noteFileName: null,
     activeCodeId: null,
+    mode: "local",
+    llmModel: "",
+    reasoning: "",
 };
 
 const highlightClasses = ["highlight-1", "highlight-2", "highlight-3", "highlight-4"];
@@ -33,6 +36,13 @@ const elements = {
     statusBar: document.getElementById("statusBar"),
     searchInput: document.getElementById("codeSearch"),
     noteFilename: document.getElementById("noteFilename"),
+    modeSelect: document.getElementById("modeSelect"),
+    modeSelectWrapper: document.getElementById("modeSelectWrapper"),
+    llmModelWrapper: document.getElementById("llmModelWrapper"),
+    llmModelInput: document.getElementById("llmModelInput"),
+    modelSelectWrapper: document.getElementById("modelSelectWrapper"),
+    methodSelectWrapper: document.getElementById("methodSelectWrapper"),
+    thresholdWrapper: document.getElementById("thresholdWrapper"),
 };
 
 const submitButtonDefaultText = elements.submitBtn ? elements.submitBtn.textContent : "Submit";
@@ -49,6 +59,31 @@ function toggleSection(element, show) {
         return;
     }
     element.classList.toggle("hidden", !show);
+}
+
+function updateModeUI() {
+    if (elements.modeSelect) {
+        elements.modeSelect.value = state.mode;
+    }
+    const useLLM = state.mode === "llm";
+    toggleSection(elements.modelSelectWrapper, !useLLM);
+    toggleSection(elements.methodSelectWrapper, !useLLM);
+    toggleSection(elements.thresholdWrapper, !useLLM);
+    toggleSection(elements.llmModelWrapper, useLLM);
+
+    if (elements.modelSelect) {
+        elements.modelSelect.disabled = useLLM;
+    }
+    if (elements.methodSelect) {
+        elements.methodSelect.disabled = useLLM;
+    }
+    if (elements.thresholdInput) {
+        elements.thresholdInput.disabled = useLLM;
+    }
+    if (elements.llmModelInput) {
+        elements.llmModelInput.disabled = !useLLM;
+        elements.llmModelInput.value = state.llmModel;
+    }
 }
 
 function setProcessing(isProcessing, target = "predict") {
@@ -74,6 +109,15 @@ function setProcessing(isProcessing, target = "predict") {
         } else {
             elements.submitCodesBtn.disabled = state.finalizedCodes.length === 0;
             elements.submitCodesBtn.textContent = submitCodesButtonDefaultText;
+        }
+    }
+
+    if (elements.modeSelect) {
+        if (isProcessing) {
+            elements.modeSelect.disabled = true;
+        } else {
+            elements.modeSelect.disabled = false;
+            updateModeUI();
         }
     }
 }
@@ -213,6 +257,92 @@ function decodeTokenFragment(token) {
             .replace(/\u00C2\u0120/g, " ")
     );
 }
+const QUOTE_TRIM_REGEX = /^[\"'“”‘’«»‹›„‟]+|[\"'“”‘’«»‹›„‟]+$/g;
+const TRAILING_PUNCT_REGEX = /[.,;:!?]+$/;
+
+function generateSpanCandidates(text) {
+    if (typeof text !== "string") {
+        return [];
+    }
+    const normalized = normalizeNote(text);
+    const trimmed = normalized.trim();
+    if (!trimmed.length) {
+        return [];
+    }
+
+    const candidates = [];
+    const addCandidate = (value) => {
+        const candidate = normalizeNote(value).trim();
+        if (candidate && !candidates.includes(candidate)) {
+            candidates.push(candidate);
+        }
+    };
+
+    addCandidate(trimmed);
+
+    const withoutQuotes = trimmed.replace(QUOTE_TRIM_REGEX, "").trim();
+    if (withoutQuotes) {
+        addCandidate(withoutQuotes);
+        const noPunctuation = withoutQuotes.replace(TRAILING_PUNCT_REGEX, "").trim();
+        if (noPunctuation) {
+            addCandidate(noPunctuation);
+        }
+    }
+
+    const trimmedNoPunctuation = trimmed.replace(TRAILING_PUNCT_REGEX, "").trim();
+    if (trimmedNoPunctuation) {
+        addCandidate(trimmedNoPunctuation);
+    }
+
+    return candidates;
+}
+
+function normalizeSpanArray(note, spans) {
+    if (!note || !Array.isArray(spans) || !spans.length) {
+        return [];
+    }
+    const noteLength = note.length;
+    const noteLower = note.toLowerCase();
+
+    return spans
+        .map((span) => {
+            if (!span) {
+                return null;
+            }
+
+            let start = Number(span.start);
+            let end = Number(span.end);
+            if (Number.isFinite(start) && Number.isFinite(end)) {
+                start = Math.max(0, Math.min(noteLength, start));
+                end = Math.max(start, Math.min(noteLength, end));
+                if (end > start) {
+                    return {
+                        start,
+                        end,
+                        text: note.slice(start, end),
+                    };
+                }
+            }
+
+            const candidates = generateSpanCandidates(span.text ?? "");
+            for (const candidate of candidates) {
+                const idx = noteLower.indexOf(candidate.toLowerCase());
+                if (idx !== -1) {
+                    const resolvedEnd = idx + candidate.length;
+                    return {
+                        start: idx,
+                        end: resolvedEnd,
+                        text: note.slice(idx, resolvedEnd),
+                    };
+                }
+            }
+
+            return null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
 function buildTokenHighlights(note, tokens) {
     if (!note || !Array.isArray(tokens) || !tokens.length) {
         return [];
@@ -514,10 +644,15 @@ function renderCodes() {
                 badge.textContent = `${token.rank}. ${tokenLabel} (${token.attribution})`;
                 tokensWrapper.appendChild(badge);
             });
+        } else if (entry.spans.length) {
+            const fallback = document.createElement("span");
+            fallback.className = "token-badge";
+            fallback.textContent = "Evidence spans available (hover to highlight).";
+            tokensWrapper.appendChild(fallback);
         } else {
             const fallback = document.createElement("span");
             fallback.className = "token-badge";
-            fallback.textContent = "No token attributions.";
+            fallback.textContent = "No highlight data.";
             tokensWrapper.appendChild(fallback);
         }
 
@@ -562,25 +697,43 @@ async function submitPrediction() {
 
     updateNote(rawNote);
 
-    const model = elements.modelSelect.value;
-    const method = elements.methodSelect.value;
-    const threshold = Number(elements.thresholdInput.value) || 0.5;
-
+    const useLLM = state.mode === "llm";
     const payload = {
         note: state.noteText,
-        model,
-        explain_method: method,
-        confidence_threshold: threshold,
     };
+    let endpoint = "/predict-explain";
+
+    if (useLLM) {
+        endpoint = "/predict-explain-llm";
+        const llmModelName = elements.llmModelInput ? elements.llmModelInput.value.trim() : "";
+        state.llmModel = llmModelName;
+        if (llmModelName) {
+            payload.model = llmModelName;
+        }
+    } else {
+        const model = elements.modelSelect.value;
+        if (!model) {
+            setStatus("Select a model before submitting.", "error");
+            return;
+        }
+        const method = elements.methodSelect.value;
+        const thresholdValue = Number(elements.thresholdInput.value);
+        const threshold = Number.isFinite(thresholdValue) ? Math.min(1, Math.max(0, thresholdValue)) : 0.5;
+
+        payload.model = model;
+        payload.explain_method = method;
+        payload.confidence_threshold = threshold;
+        elements.thresholdInput.value = threshold.toString();
+    }
 
     try {
-        setStatus("Running prediction...", "loading");
+        setStatus(useLLM ? "Running LLM prediction..." : "Running prediction...", "loading");
         setProcessing(true, "predict");
         clearFinalizedCodes();
         clearCodes();
         renderNote();
 
-        const response = await fetch("/predict-explain", {
+        const response = await fetch(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -595,9 +748,17 @@ async function submitPrediction() {
             throw new Error(data.error);
         }
 
+        state.reasoning =
+            useLLM && typeof data.reasoning === "string" ? data.reasoning.trim() : "";
+
         const codes = Array.isArray(data.icd_codes) ? data.icd_codes : [];
         if (!codes.length) {
-            setStatus("No ICD codes met the confidence threshold.", "success");
+            setStatus(
+                useLLM
+                    ? "LLM did not return any ICD codes."
+                    : "No ICD codes met the confidence threshold.",
+                "success"
+            );
             clearCodes();
             toggleSection(elements.noteEditorContainer, true);
             return;
@@ -619,15 +780,37 @@ async function submitPrediction() {
                               : token.attribution ?? "n/a",
                   }))
                 : [];
-            const spans = buildTokenHighlights(state.noteText, tokens);
+
+            let spans = normalizeSpanArray(state.noteText, entry.explanation?.spans);
+            if (!spans.length && Array.isArray(entry.evidence_spans)) {
+                spans = normalizeSpanArray(state.noteText, entry.evidence_spans);
+            }
+            if (!spans.length && tokens.length) {
+                spans = buildTokenHighlights(state.noteText, tokens);
+            }
+
+            let probabilityValue = null;
+            if (typeof entry.probability === "number" && !Number.isNaN(entry.probability)) {
+                probabilityValue = entry.probability;
+            } else if (typeof entry.probability === "string") {
+                const parsedProbability = Number(entry.probability);
+                if (!Number.isNaN(parsedProbability)) {
+                    probabilityValue = parsedProbability;
+                }
+            }
+
             return {
                 id: `${entry.code}-${index}`,
                 code: entry.code,
                 description: entry.description ?? "",
-                probability: entry.probability ?? null,
+                probability:
+                    typeof probabilityValue === "number" && !Number.isNaN(probabilityValue)
+                        ? probabilityValue
+                        : null,
                 highlightClass,
                 tokens,
                 spans,
+                source: useLLM ? "llm" : "local",
             };
         });
 
@@ -635,7 +818,15 @@ async function submitPrediction() {
         toggleSection(elements.noteEditorContainer, false);
         toggleSection(elements.noteDisplayContainer, true);
         renderNote();
-        setStatus(`Received ${state.codes.length} ICD code${state.codes.length > 1 ? "s" : ""}.`, "success");
+
+        const originLabel = useLLM ? "LLM" : "local model";
+        setStatus(
+            `Received ${state.codes.length} ICD code${state.codes.length === 1 ? "" : "s"} (${originLabel}).`,
+            "success"
+        );
+        if (useLLM && state.reasoning) {
+            console.info("LLM reasoning:", state.reasoning);
+        }
     } catch (error) {
         setStatus(`Prediction failed: ${error.message}`, "error");
         clearCodes();
@@ -717,6 +908,31 @@ function resetAll() {
 }
 
 function initEvents() {
+    if (elements.modeSelect) {
+        elements.modeSelect.addEventListener("change", (event) => {
+            const newMode = event.target.value === "llm" ? "llm" : "local";
+            if (state.mode !== newMode) {
+                state.mode = newMode;
+                updateModeUI();
+                clearCodes();
+                clearFinalizedCodes();
+                renderNote();
+                setStatus(
+                    newMode === "llm"
+                        ? "Switched to LLM mode. Provide a note and submit to fetch LLM predictions."
+                        : "Switched to local model mode.",
+                    "info"
+                );
+            }
+        });
+    }
+
+    if (elements.llmModelInput) {
+        elements.llmModelInput.addEventListener("input", (event) => {
+            state.llmModel = event.target.value;
+        });
+    }
+
     elements.noteInput.addEventListener("input", (event) => {
         updateNote(event.target.value);
     });
@@ -752,10 +968,12 @@ function initEvents() {
 
     elements.searchInput.addEventListener("input", renderCodes);
     updateSubmitCodesState();
+    updateModeUI();
 }
 
 function boot() {
     initEvents();
+    updateModeUI();
     updateNote("");
     clearCodes();
     clearFinalizedCodes();

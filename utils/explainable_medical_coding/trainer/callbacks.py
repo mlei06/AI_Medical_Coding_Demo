@@ -13,7 +13,16 @@ import wandb
 
 load_dotenv(find_dotenv())
 
-experiment_path = os.environ["EXPERIMENT_PATH"]
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_EXPERIMENT_PATH = REPO_ROOT / "models"
+
+experiment_path_env = os.getenv("EXPERIMENT_PATH")
+# Fall back to the repo's models/ directory when the environment variable is unset.
+experiment_path = (
+    Path(experiment_path_env).expanduser()
+    if experiment_path_env
+    else DEFAULT_EXPERIMENT_PATH
+)
 
 FORMATTING_PATTERN = r"\[([^\]]+)\]"
 FORMATTING_REGEX = re.compile(FORMATTING_PATTERN)
@@ -122,7 +131,7 @@ class WandbCallback(BaseCallback):
         if not trainer.config.debug:
             # make a folder for the model where configs and model weights are saved
 
-            trainer.experiment_path = Path(experiment_path) / wandb.run.id
+            trainer.experiment_path = experiment_path / wandb.run.id
             trainer.experiment_path.mkdir(exist_ok=False, parents=True)
 
     def log_dict(

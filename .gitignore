@@ -31,6 +31,7 @@ Thumbs.db
 
 # Project-specific artifacts
 models/*
+!models/.gitkeep
 !models/README.md
 demo-ui/output/
 
