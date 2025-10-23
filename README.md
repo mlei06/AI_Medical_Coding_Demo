@@ -1,13 +1,13 @@
-# Explainable Medical Coding Service
+# Explainable Medical Coding Suite
 
-A FastAPI service for explainable medical code prediction using pre-trained language models with attribution analysis.
+An evaluation and inference toolkit for explainable medical code prediction, combining automated scoring pipelines with interactive inference services.
 
 ## Features
 
-- **Medical Code Prediction**: Predict ICD-9 and CPT codes from clinical notes
-- **Explainability**: Token-level attribution analysis showing which parts of the text influenced predictions
-- **Confidence Scores**: Probability scores for each predicted code
-- **REST API**: FastAPI-based service with automatic documentation
+- **Evaluation Harness**: `eval.py` guides LLM and PLM scoring with recall/precision metrics and optional dataset subsetting.
+- **Explainable Inference**: FastAPI service exposes prediction and attribution APIs for ICD-9 and CPT codes.
+- **Interactive Tooling**: Demo UI and cURL helper streamline manual review and experimentation.
+- **Attribution Insights**: Token-level importance scores with accompanying confidence estimates.
 
 ## Setup
 
