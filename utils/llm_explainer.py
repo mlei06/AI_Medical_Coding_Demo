@@ -158,6 +158,7 @@ def _invoke_openai(
     payload: Dict[str, Any] = {
         "model": model_name,
         "input": _messages_to_responses_input(_build_messages(prompt, note)),
+
     }
 
     prepared_options = _prepare_responses_kwargs(options)
@@ -359,7 +360,7 @@ def predict_codes_with_llm(
     if not model:
         raise ValueError("No LLM model configured. Set LLM_CODING_MODEL or provide model_name.")
 
-    payload_options = {"max_output_tokens": 1200}
+    payload_options = {"max_output_tokens": 5000}
     payload_options.update(_filter_extras(extras))
 
     request_uuid = uuid.uuid4().hex
