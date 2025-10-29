@@ -3,10 +3,13 @@ const state = {
     noteText: "",
     models: [],
     methods: [],
-    codes: [],
+    icdCodes: [],
+    cptCodes: [],
     finalizedCodes: [],
     noteFileName: null,
-    activeCodeId: null,
+    selectedIcdCodeIds: new Set(),
+    selectedCptCodeIds: new Set(),
+    activeTab: "icd", // "icd" or "cpt"
     mode: "local",
     llmModel: "",
     reasoning: "",
@@ -32,9 +35,11 @@ const elements = {
     methodSelect: document.getElementById("methodSelect"),
     thresholdInput: document.getElementById("thresholdInput"),
     codesContainer: document.getElementById("codesContainer"),
+    cptCodesContainer: document.getElementById("cptCodesContainer"),
     finalizedContainer: document.getElementById("finalizedContainer"),
     statusBar: document.getElementById("statusBar"),
     searchInput: document.getElementById("codeSearch"),
+    cptSearchInput: document.getElementById("cptCodeSearch"),
     noteFilename: document.getElementById("noteFilename"),
     modeSelect: document.getElementById("modeSelect"),
     modeSelectWrapper: document.getElementById("modeSelectWrapper"),
@@ -43,6 +48,11 @@ const elements = {
     modelSelectWrapper: document.getElementById("modelSelectWrapper"),
     methodSelectWrapper: document.getElementById("methodSelectWrapper"),
     thresholdWrapper: document.getElementById("thresholdWrapper"),
+    codeTabs: document.getElementById("codeTabs"),
+    icdTab: document.getElementById("icdTab"),
+    cptTab: document.getElementById("cptTab"),
+    icdTabContent: document.getElementById("icdTabContent"),
+    cptTabContent: document.getElementById("cptTabContent"),
 };
 
 const submitButtonDefaultText = elements.submitBtn ? elements.submitBtn.textContent : "Submit";
@@ -158,16 +168,18 @@ function updateSubmitCodesState() {
 function clearFinalizedCodes() {
     state.finalizedCodes = [];
     renderFinalizedCodes();
-    if (state.codes.length) {
-        renderCodes();
+    if (state.icdCodes.length || state.cptCodes.length) {
+        renderCodes("icd");
+        renderCodes("cpt");
     }
 }
 
 function removeFinalizedCode(code) {
     state.finalizedCodes = state.finalizedCodes.filter((entry) => entry.code !== code);
     renderFinalizedCodes();
-    if (state.codes.length) {
-        renderCodes();
+    if (state.icdCodes.length || state.cptCodes.length) {
+        renderCodes("icd");
+        renderCodes("cpt");
     }
 }
 
@@ -196,7 +208,8 @@ function renderFinalizedCodes() {
 
         const codeEl = document.createElement("div");
         codeEl.className = "code";
-        codeEl.textContent = entry.code;
+        const codeType = entry.type || "icd";
+        codeEl.innerHTML = `<span class="code-type">${codeType.toUpperCase()}</span> ${entry.code}`;
 
         const descEl = document.createElement("div");
         descEl.className = "description";
@@ -232,8 +245,9 @@ function addFinalizedCode(entry) {
     if (!entry) {
         return;
     }
-    if (state.finalizedCodes.some((item) => item.code === entry.code)) {
-        setStatus(`Code ${entry.code} is already in the finalized list.`, "error");
+    const codeType = entry.type || "icd";
+    if (state.finalizedCodes.some((item) => item.code === entry.code && item.type === codeType)) {
+        setStatus(`${codeType.toUpperCase()} code ${entry.code} is already in the finalized list.`, "error");
         return;
     }
 
@@ -241,6 +255,7 @@ function addFinalizedCode(entry) {
         code: entry.code,
         description: entry.description ?? "",
         probability: entry.probability ?? null,
+        type: codeType,
     });
     renderFinalizedCodes();
 }
@@ -397,7 +412,7 @@ function buildTokenHighlights(note, tokens) {
     return spans.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
-function renderNote(spans = [], highlightClass = "") {
+function renderNote(spans = []) {
     const container = elements.noteDisplay;
     container.innerHTML = "";
 
@@ -418,13 +433,18 @@ function renderNote(spans = [], highlightClass = "") {
                       typeof span.text === "string" && span.text.length
                           ? span.text
                           : state.noteText.slice(start, end);
-                  return { start, end, text };
+                  return { 
+                      start, 
+                      end, 
+                      text, 
+                      highlightClass: span.highlightClass || ""
+                  };
               })
               .filter((span) => span.end > span.start)
               .sort((a, b) => a.start - b.start || a.end - b.end)
         : [];
 
-    if (!sanitizedSpans.length || !highlightClass) {
+    if (!sanitizedSpans.length) {
         container.textContent = state.noteText;
         return;
     }
@@ -445,7 +465,7 @@ function renderNote(spans = [], highlightClass = "") {
 
         if (safeEnd > safeStart) {
             const highlightEl = document.createElement("span");
-            highlightEl.className = `note-highlight ${highlightClass}`;
+            highlightEl.className = `note-highlight ${span.highlightClass}`;
             highlightEl.textContent = span.text ?? state.noteText.slice(safeStart, safeEnd);
             fragment.appendChild(highlightEl);
         }
@@ -460,6 +480,57 @@ function renderNote(spans = [], highlightClass = "") {
     container.appendChild(fragment);
 }
 
+function updateActiveHighlight() {
+    const selectedIcdIds = Array.from(state.selectedIcdCodeIds);
+    const selectedCptIds = Array.from(state.selectedCptCodeIds);
+    const selectedIcdEntries = state.icdCodes.filter((entry) => selectedIcdIds.includes(entry.id));
+    const selectedCptEntries = state.cptCodes.filter((entry) => selectedCptIds.includes(entry.id));
+
+    const allSelectedEntries = [...selectedIcdEntries, ...selectedCptEntries];
+
+    if (allSelectedEntries.length > 0) {
+        // Combine all spans from selected entries
+        const allSpans = [];
+        allSelectedEntries.forEach((entry) => {
+            if (entry.spans && entry.spans.length > 0) {
+                allSpans.push(...entry.spans.map(span => ({
+                    ...span,
+                    highlightClass: entry.highlightClass
+                })));
+            }
+        });
+        renderNote(allSpans);
+    } else {
+        renderNote();
+    }
+
+    // Update ICD cards
+    document.querySelectorAll("#codesContainer .code-card").forEach((card) => {
+        const cardId = card.dataset.codeId;
+        const isActive = state.selectedIcdCodeIds.has(cardId);
+        card.classList.toggle("active", isActive);
+        card.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+    // Update CPT cards
+    document.querySelectorAll("#cptCodesContainer .code-card").forEach((card) => {
+        const cardId = card.dataset.codeId;
+        const isActive = state.selectedCptCodeIds.has(cardId);
+        card.classList.toggle("active", isActive);
+        card.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+}
+
+function toggleCodeSelection(codeId, codeType = "icd") {
+    const selectedSet = codeType === "icd" ? state.selectedIcdCodeIds : state.selectedCptCodeIds;
+    if (selectedSet.has(codeId)) {
+        selectedSet.delete(codeId);
+    } else {
+        selectedSet.add(codeId);
+    }
+    updateActiveHighlight();
+}
+
 function updateNote(text) {
     state.originalNoteText = text || "";
     state.noteText = normalizeNote(state.originalNoteText);
@@ -467,8 +538,12 @@ function updateNote(text) {
 
     const hasText = state.noteText.trim().length > 0;
     toggleSection(elements.noteEditorContainer, hasText);
+    
+    // Only show note display container if there are codes to highlight
+    const hasCodes = state.icdCodes.length > 0 || state.cptCodes.length > 0;
+    toggleSection(elements.noteDisplayContainer, hasText && hasCodes);
 
-    if (state.codes.length > 0) {
+    if (state.icdCodes.length > 0 || state.cptCodes.length > 0) {
         clearCodes();
     }
 
@@ -513,6 +588,10 @@ function handleDragLeave(event) {
 }
 
 function populateSelect(selectElement, values) {
+    if (!selectElement) {
+        console.warn("Select element not found");
+        return;
+    }
     selectElement.innerHTML = "";
     values.forEach((value, index) => {
         const option = document.createElement("option");
@@ -556,7 +635,13 @@ async function fetchOptions() {
 
         setStatus("Configuration loaded. Ready when you are.", "success");
     } catch (error) {
-        setStatus(`Error loading configuration: ${error.message}`, "error");
+        console.warn("Failed to fetch configuration, using fallback values:", error);
+        // Use fallback values even if server is not available
+        state.models = ["roberta-base-pm-m3-voc-hf"];
+        state.methods = ["grad_attention"];
+        populateSelect(elements.modelSelect, state.models);
+        populateSelect(elements.methodSelect, state.methods);
+        setStatus("Using fallback configuration. Server may not be running.", "error");
     }
 }
 
@@ -568,16 +653,24 @@ function formatProbability(value) {
 }
 
 function clearCodes() {
-    state.activeCodeId = null;
-    state.codes = [];
-    elements.codesContainer.innerHTML = `<p class="empty-state">No predictions yet. Upload a note and submit to see results.</p>`;
-    toggleSection(elements.noteDisplayContainer, false);
+    state.selectedIcdCodeIds.clear();
+    state.selectedCptCodeIds.clear();
+    state.icdCodes = [];
+    state.cptCodes = [];
+    elements.codesContainer.innerHTML = `<p class="empty-state">No ICD predictions yet. Upload a note and submit to see results.</p>`;
+    elements.cptCodesContainer.innerHTML = `<p class="empty-state">No CPT predictions yet. Upload a note and submit to see results.</p>`;
     updateSubmitCodesState();
+    renderNote();
 }
 
-function renderCodes() {
-    const searchTerm = elements.searchInput.value.trim().toLowerCase();
-    const filtered = state.codes.filter((entry) => {
+function renderCodes(codeType = "icd") {
+    const codes = codeType === "icd" ? state.icdCodes : state.cptCodes;
+    const container = codeType === "icd" ? elements.codesContainer : elements.cptCodesContainer;
+    const searchInput = codeType === "icd" ? elements.searchInput : elements.cptSearchInput;
+    const selectedSet = codeType === "icd" ? state.selectedIcdCodeIds : state.selectedCptCodeIds;
+    
+    const searchTerm = searchInput.value.trim().toLowerCase();
+    const filtered = codes.filter((entry) => {
         if (!searchTerm) {
             return true;
         }
@@ -586,19 +679,35 @@ function renderCodes() {
     });
 
     if (!filtered.length) {
-        elements.codesContainer.innerHTML = `<p class="empty-state">No codes match that search.</p>`;
-        renderNote();
+        const emptyMessage = searchTerm 
+            ? "No codes match that search." 
+            : `No ${codeType.toUpperCase()} predictions yet. Upload a note and submit to see results.`;
+        container.innerHTML = `<p class="empty-state">${emptyMessage}</p>`;
+        selectedSet.clear();
+        updateActiveHighlight();
         updateSubmitCodesState();
         return;
     }
 
-    elements.codesContainer.innerHTML = "";
+    // Remove selected codes that are no longer in the filtered results
+    const filteredIds = new Set(filtered.map(entry => entry.id));
+    selectedSet.forEach(id => {
+        if (!filteredIds.has(id)) {
+            selectedSet.delete(id);
+        }
+    });
+
+    container.innerHTML = "";
     filtered.forEach((entry) => {
         const card = document.createElement("div");
         card.className = "code-card";
-        if (state.activeCodeId === entry.id) {
+        if (selectedSet.has(entry.id)) {
             card.classList.add("active");
         }
+        card.dataset.codeId = entry.id;
+        card.setAttribute("role", "button");
+        card.tabIndex = 0;
+        card.setAttribute("aria-pressed", selectedSet.has(entry.id) ? "true" : "false");
 
         const header = document.createElement("header");
         const codeEl = document.createElement("div");
@@ -612,13 +721,13 @@ function renderCodes() {
         addBtn.className = "code-add-btn";
         addBtn.title = "Add to finalized codes";
         addBtn.textContent = "+";
-        if (state.finalizedCodes.some((item) => item.code === entry.code)) {
+        if (state.finalizedCodes.some((item) => item.code === entry.code && item.type === codeType)) {
             addBtn.disabled = true;
             addBtn.classList.add("added");
         }
         addBtn.addEventListener("click", (event) => {
             event.stopPropagation();
-            addFinalizedCode(entry);
+            addFinalizedCode({...entry, type: codeType});
             addBtn.disabled = true;
             addBtn.classList.add("added");
         });
@@ -633,7 +742,7 @@ function renderCodes() {
 
         const tokensWrapper = document.createElement("div");
         tokensWrapper.className = "token-badges";
-        if (entry.tokens.length) {
+        if (entry.tokens && entry.tokens.length) {
             entry.tokens.forEach((token) => {
                 const badge = document.createElement("span");
                 badge.className = "token-badge";
@@ -644,10 +753,10 @@ function renderCodes() {
                 badge.textContent = `${token.rank}. ${tokenLabel} (${token.attribution})`;
                 tokensWrapper.appendChild(badge);
             });
-        } else if (entry.spans.length) {
+        } else if (entry.spans && entry.spans.length) {
             const fallback = document.createElement("span");
             fallback.className = "token-badge";
-            fallback.textContent = "Evidence spans available (hover to highlight).";
+            fallback.textContent = "Evidence spans available (click to highlight).";
             tokensWrapper.appendChild(fallback);
         } else {
             const fallback = document.createElement("span");
@@ -660,30 +769,20 @@ function renderCodes() {
         card.appendChild(desc);
         card.appendChild(tokensWrapper);
 
-        card.addEventListener("mouseenter", () => {
-            state.activeCodeId = entry.id;
-            renderNote(entry.spans, entry.highlightClass);
-            document
-                .querySelectorAll(".code-card")
-                .forEach((el) => el.classList.toggle("active", el === card));
-        });
-
-        card.addEventListener("mouseleave", () => {
-            state.activeCodeId = null;
-            renderNote();
-            document.querySelectorAll(".code-card").forEach((el) => el.classList.remove("active"));
-        });
-
         card.addEventListener("click", () => {
-            state.activeCodeId = entry.id;
-            renderNote(entry.spans, entry.highlightClass);
-            document
-                .querySelectorAll(".code-card")
-                .forEach((el) => el.classList.toggle("active", el === card));
+            toggleCodeSelection(entry.id, codeType);
         });
 
-        elements.codesContainer.appendChild(card);
+        card.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                toggleCodeSelection(entry.id, codeType);
+            }
+        });
+
+        container.appendChild(card);
     });
+    updateActiveHighlight();
     updateSubmitCodesState();
 }
 
@@ -751,12 +850,14 @@ async function submitPrediction() {
         state.reasoning =
             useLLM && typeof data.reasoning === "string" ? data.reasoning.trim() : "";
 
-        const codes = Array.isArray(data.icd_codes) ? data.icd_codes : [];
-        if (!codes.length) {
+        const icdCodes = Array.isArray(data.icd_codes) ? data.icd_codes : [];
+        const cptCodes = Array.isArray(data.cpt_codes) ? data.cpt_codes : [];
+        
+        if (!icdCodes.length && !cptCodes.length) {
             setStatus(
                 useLLM
-                    ? "LLM did not return any ICD codes."
-                    : "No ICD codes met the confidence threshold.",
+                    ? "LLM did not return any codes."
+                    : "No codes met the confidence threshold.",
                 "success"
             );
             clearCodes();
@@ -764,7 +865,8 @@ async function submitPrediction() {
             return;
         }
 
-        state.codes = codes.map((entry, index) => {
+        // Process ICD codes
+        state.icdCodes = icdCodes.map((entry, index) => {
             const highlightClass = highlightClasses[index % highlightClasses.length];
             const tokens = Array.isArray(entry.explanation?.tokens)
                 ? entry.explanation.tokens.map((token) => ({
@@ -800,7 +902,7 @@ async function submitPrediction() {
             }
 
             return {
-                id: `${entry.code}-${index}`,
+                id: `icd-${entry.code}-${index}`,
                 code: entry.code,
                 description: entry.description ?? "",
                 probability:
@@ -814,14 +916,71 @@ async function submitPrediction() {
             };
         });
 
-        renderCodes();
+        // Process CPT codes
+        state.cptCodes = cptCodes.map((entry, index) => {
+            const highlightClass = highlightClasses[(index + icdCodes.length) % highlightClasses.length];
+            const tokens = Array.isArray(entry.explanation?.tokens)
+                ? entry.explanation.tokens.map((token) => ({
+                      token: token.token ?? "",
+                      display:
+                          typeof token.token_display === "string" && token.token_display.length
+                              ? normalizeNote(token.token_display)
+                              : decodeTokenFragment(token.token ?? ""),
+                      rank: token.rank ?? "-",
+                      attribution:
+                          typeof token.attribution === "number"
+                              ? token.attribution.toFixed(3)
+                              : token.attribution ?? "n/a",
+                  }))
+                : [];
+
+            let spans = normalizeSpanArray(state.noteText, entry.explanation?.spans);
+            if (!spans.length && Array.isArray(entry.evidence_spans)) {
+                spans = normalizeSpanArray(state.noteText, entry.evidence_spans);
+            }
+            if (!spans.length && tokens.length) {
+                spans = buildTokenHighlights(state.noteText, tokens);
+            }
+
+            let probabilityValue = null;
+            if (typeof entry.probability === "number" && !Number.isNaN(entry.probability)) {
+                probabilityValue = entry.probability;
+            } else if (typeof entry.probability === "string") {
+                const parsedProbability = Number(entry.probability);
+                if (!Number.isNaN(parsedProbability)) {
+                    probabilityValue = parsedProbability;
+                }
+            }
+
+            return {
+                id: `cpt-${entry.code}-${index}`,
+                code: entry.code,
+                description: entry.description ?? "",
+                probability:
+                    typeof probabilityValue === "number" && !Number.isNaN(probabilityValue)
+                        ? probabilityValue
+                        : null,
+                highlightClass,
+                tokens,
+                spans,
+                source: useLLM ? "llm" : "local",
+            };
+        });
+
+        renderCodes("icd");
+        renderCodes("cpt");
         toggleSection(elements.noteEditorContainer, false);
         toggleSection(elements.noteDisplayContainer, true);
         renderNote();
 
         const originLabel = useLLM ? "LLM" : "local model";
+        const totalCodes = state.icdCodes.length + state.cptCodes.length;
+        const icdText = state.icdCodes.length > 0 ? `${state.icdCodes.length} ICD code${state.icdCodes.length === 1 ? "" : "s"}` : "";
+        const cptText = state.cptCodes.length > 0 ? `${state.cptCodes.length} CPT code${state.cptCodes.length === 1 ? "" : "s"}` : "";
+        const codesText = [icdText, cptText].filter(Boolean).join(" and ");
+        
         setStatus(
-            `Received ${state.codes.length} ICD code${state.codes.length === 1 ? "" : "s"} (${originLabel}).`,
+            `Received ${codesText} (${originLabel}).`,
             "success"
         );
         if (useLLM && state.reasoning) {
@@ -854,10 +1013,19 @@ async function submitFinalizedCodes() {
             : `manual-note-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
     state.noteFileName = effectiveFileName;
 
+    // Separate ICD and CPT codes
+    const icdCodes = state.finalizedCodes.filter(entry => entry.type === "icd");
+    const cptCodes = state.finalizedCodes.filter(entry => entry.type === "cpt");
+
     const payload = {
         note_text: state.noteText,
         note_filename: effectiveFileName,
-        codes: state.finalizedCodes.map((entry) => ({
+        icd_codes: icdCodes.map((entry) => ({
+            code: entry.code,
+            description: entry.description ?? "",
+            probability: entry.probability,
+        })),
+        cpt_codes: cptCodes.map((entry) => ({
             code: entry.code,
             description: entry.description ?? "",
             probability: entry.probability,
@@ -881,7 +1049,17 @@ async function submitFinalizedCodes() {
 
         const data = await response.json();
         const outputPath = data.output_path || "output";
-        setStatus(`Codes submitted successfully. Saved to ${outputPath}.`, "success");
+        const icdCount = icdCodes.length;
+        const cptCount = cptCodes.length;
+        let message = `Codes submitted successfully. Saved to ${outputPath}.`;
+        if (icdCount > 0 && cptCount > 0) {
+            message += ` Created separate files: ${icdCount} ICD code${icdCount === 1 ? '' : 's'} and ${cptCount} CPT code${cptCount === 1 ? '' : 's'}.`;
+        } else if (icdCount > 0) {
+            message += ` Created ICD codes file with ${icdCount} code${icdCount === 1 ? '' : 's'}.`;
+        } else if (cptCount > 0) {
+            message += ` Created CPT codes file with ${cptCount} code${cptCount === 1 ? '' : 's'}.`;
+        }
+        setStatus(message, "success");
     } catch (error) {
         setStatus(`Failed to submit codes: ${error.message}`, "error");
     } finally {
@@ -890,17 +1068,40 @@ async function submitFinalizedCodes() {
     }
 }
 
+function switchTab(tabType) {
+    state.activeTab = tabType;
+    
+    // Update tab buttons
+    if (elements.icdTab && elements.cptTab) {
+        elements.icdTab.classList.toggle("active", tabType === "icd");
+        elements.cptTab.classList.toggle("active", tabType === "cpt");
+    }
+    
+    // Update tab content
+    if (elements.icdTabContent && elements.cptTabContent) {
+        elements.icdTabContent.classList.toggle("active", tabType === "icd");
+        elements.cptTabContent.classList.toggle("active", tabType === "cpt");
+    }
+}
+
 function resetAll() {
     elements.noteInput.value = "";
     elements.searchInput.value = "";
+    if (elements.cptSearchInput) {
+        elements.cptSearchInput.value = "";
+    }
     state.originalNoteText = "";
     state.noteText = "";
     state.noteFileName = null;
-    state.codes = [];
-    state.activeCodeId = null;
+    state.icdCodes = [];
+    state.cptCodes = [];
+    state.selectedIcdCodeIds.clear();
+    state.selectedCptCodeIds.clear();
+    state.activeTab = "icd";
     renderNote();
     clearCodes();
     clearFinalizedCodes();
+    switchTab("icd");
     toggleSection(elements.noteEditorContainer, false);
     toggleSection(elements.noteDisplayContainer, false);
     setProcessing(false, "predict");
@@ -961,12 +1162,25 @@ function initEvents() {
         elements.submitCodesBtn.addEventListener("click", submitFinalizedCodes);
     }
     elements.clearHighlightsBtn.addEventListener("click", () => {
-        state.activeCodeId = null;
-        renderNote();
-        document.querySelectorAll(".code-card").forEach((el) => el.classList.remove("active"));
+        state.selectedIcdCodeIds.clear();
+        state.selectedCptCodeIds.clear();
+        updateActiveHighlight();
     });
 
-    elements.searchInput.addEventListener("input", renderCodes);
+    // Tab switching functionality
+    if (elements.icdTab) {
+        elements.icdTab.addEventListener("click", () => switchTab("icd"));
+    }
+    if (elements.cptTab) {
+        elements.cptTab.addEventListener("click", () => switchTab("cpt"));
+    }
+
+    // Search event listeners
+    elements.searchInput.addEventListener("input", () => renderCodes("icd"));
+    if (elements.cptSearchInput) {
+        elements.cptSearchInput.addEventListener("input", () => renderCodes("cpt"));
+    }
+    
     updateSubmitCodesState();
     updateModeUI();
 }

@@ -5,7 +5,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Explainable Medical Coding</title>
-    <link rel="stylesheet" href="/ui/styles.css">
+    <link rel="stylesheet" href="/ui/styles.css?v=20241220-4">
 </head>
 <body>
     <div class="app-shell">
@@ -41,7 +41,7 @@
                     <span>Confidence ≥</span>
                     <input id="thresholdInput" type="number" min="0" max="1" step="0.05" value="0.5">
                 </label>
-                <button id="submitBtn" class="primary-btn">Submit</button>
+                <button id="submitBtn" class="primary-btn">Predict</button>
             </div>
         </header>
         <main class="app-main">
@@ -79,10 +79,22 @@
                     <div class="section-header">
                         <h3>AI Suggested Codes</h3>
                     </div>
-                    <div class="search-box">
-                        <input id="codeSearch" type="search" placeholder="Search codes...">
+                    <div class="code-tabs" id="codeTabs">
+                        <button id="icdTab" class="tab-button active" data-tab="icd">ICD Codes</button>
+                        <button id="cptTab" class="tab-button" data-tab="cpt">CPT Codes</button>
                     </div>
-                    <div id="codesContainer" class="codes-container"></div>
+                    <div id="icdTabContent" class="tab-content active">
+                        <div class="search-box">
+                            <input id="codeSearch" type="search" placeholder="Search ICD codes...">
+                        </div>
+                        <div id="codesContainer" class="codes-container"></div>
+                    </div>
+                    <div id="cptTabContent" class="tab-content">
+                        <div class="search-box">
+                            <input id="cptCodeSearch" type="search" placeholder="Search CPT codes...">
+                        </div>
+                        <div id="cptCodesContainer" class="codes-container"></div>
+                    </div>
                 </div>
                 <div class="sidebar-section finalized">
                     <div class="section-header">
@@ -107,7 +119,7 @@
             </div>
         </div>
     </div>
-    <script src="/ui/app.js" defer></script>
+    <script src="/ui/app.js?v=20241220-4" defer></script>
 </body>
 </html>
 

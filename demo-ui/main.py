@@ -54,7 +54,9 @@ class FinalizedCode(BaseModel):
 class SubmitCodesPayload(BaseModel):
     note_text: str
     note_filename: Optional[str] = None
-    codes: List[FinalizedCode]
+    codes: Optional[List[FinalizedCode]] = None  # Keep for backward compatibility
+    icd_codes: Optional[List[FinalizedCode]] = None
+    cpt_codes: Optional[List[FinalizedCode]] = None
 
 
 async def _proxy_request(method: str, upstream_path: str, request: Request, *, include_body: bool = False) -> Response:
@@ -121,7 +123,16 @@ async def proxy_description(request: Request):
 async def submit_codes(payload: SubmitCodesPayload):
     if not payload.note_text.strip():
         raise HTTPException(status_code=400, detail="note_text cannot be empty.")
-    if not payload.codes:
+    
+    # Handle both old format (codes) and new format (icd_codes, cpt_codes)
+    icd_codes = payload.icd_codes or []
+    cpt_codes = payload.cpt_codes or []
+    
+    # Backward compatibility: if only 'codes' is provided, treat them as ICD codes
+    if payload.codes and not icd_codes and not cpt_codes:
+        icd_codes = payload.codes
+    
+    if not icd_codes and not cpt_codes:
         raise HTTPException(status_code=400, detail="Provide at least one finalized code.")
 
     proposed_name = payload.note_filename or f"manual-note-{datetime.now():%Y%m%d-%H%M%S}.txt"
@@ -140,17 +151,53 @@ async def submit_codes(payload: SubmitCodesPayload):
     note_file = output_dir / note_filename
     note_file.write_text(payload.note_text, encoding="utf-8")
 
-    codes_lines = []
-    for idx, code in enumerate(payload.codes, start=1):
-        line = f"{idx}. {code.code}"
-        if code.description:
-            line += f" - {code.description}"
-        if code.probability is not None:
-            line += f" (probability: {code.probability:.4f})"
-        codes_lines.append(line)
+    created_files = []
+    
+    # Create ICD codes file
+    if icd_codes:
+        icd_lines = []
+        for idx, code in enumerate(icd_codes, start=1):
+            line = f"{idx}. {code.code}"
+            if code.description:
+                line += f" - {code.description}"
+            if code.probability is not None:
+                line += f" (probability: {code.probability:.4f})"
+            icd_lines.append(line)
 
-    codes_file = output_dir / "finalized_codes.txt"
-    codes_file.write_text("\n".join(codes_lines) + "\n", encoding="utf-8")
+        icd_file = output_dir / "icd_codes.txt"
+        icd_file.write_text("\n".join(icd_lines) + "\n", encoding="utf-8")
+        created_files.append(icd_file.name)
+
+    # Create CPT codes file
+    if cpt_codes:
+        cpt_lines = []
+        for idx, code in enumerate(cpt_codes, start=1):
+            line = f"{idx}. {code.code}"
+            if code.description:
+                line += f" - {code.description}"
+            if code.probability is not None:
+                line += f" (probability: {code.probability:.4f})"
+            cpt_lines.append(line)
+
+        cpt_file = output_dir / "cpt_codes.txt"
+        cpt_file.write_text("\n".join(cpt_lines) + "\n", encoding="utf-8")
+        created_files.append(cpt_file.name)
+
+    # Create combined file for backward compatibility
+    all_codes = icd_codes + cpt_codes
+    if all_codes:
+        combined_lines = []
+        for idx, code in enumerate(all_codes, start=1):
+            line = f"{idx}. {code.code}"
+            if code.description:
+                line += f" - {code.description}"
+            if code.probability is not None:
+                line += f" (probability: {code.probability:.4f})"
+            combined_lines.append(line)
+
+        combined_file = output_dir / "finalized_codes.txt"
+        combined_file.write_text("\n".join(combined_lines) + "\n", encoding="utf-8")
+        created_files.append(combined_file.name)
 
     try:
         relative_path = str(output_dir.relative_to(BASE_DIR))
@@ -161,5 +208,5 @@ async def submit_codes(payload: SubmitCodesPayload):
         "message": "Codes saved successfully.",
         "output_path": relative_path,
         "note_file": note_filename,
-        "codes_file": codes_file.name,
+        "created_files": created_files,
     }
