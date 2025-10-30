@@ -90,7 +90,7 @@ Follow these rules:
 1. Use ICD-9-CM codes (3-5 digits) for diagnoses; CPT codes must be five digits with no modifiers.
 2. List the principal diagnosis first, then secondary diagnoses; CPT codes in chronological order of services.
 3. Every code needs a concise explanation (<= 30 words) and 1-3 evidence spans - short verbatim quotes from the note that prove the code applies.
-4. Evidence spans must be copied exactly from the note (no paraphrasing). Pair each with a brief explanation of why it supports the code.
+4. Evidence spans must be copied exactly from the note (no paraphrasing). Do not insert ellipses (...) or otherwise truncate the text—quote the contiguous passage exactly as written. Pair each with a brief explanation of why it supports the code.
 5. If you are unsure whether a code applies, omit it.
 6. Return JSON only, matching this structure exactly:
 {

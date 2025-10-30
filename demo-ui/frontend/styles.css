@@ -230,6 +230,8 @@ body {
     white-space: pre-wrap;
     line-height: 1.6;
     font-size: 0.98rem;
+    overflow-y: auto;
+    max-height: 60vh;
 }
 
 .note-display .placeholder {
@@ -310,6 +312,46 @@ body {
     font-size: 0.85rem;
 }
 
+.code-tabs {
+    display: flex;
+    background: rgba(148, 163, 184, 0.1);
+    border-radius: 12px;
+    padding: 0.25rem;
+    margin-bottom: 0.75rem;
+}
+
+.tab-button {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tab-button.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 2px 4px rgba(15, 23, 42, 0.1);
+}
+
+.tab-button:hover:not(.active) {
+    color: var(--text);
+    background: rgba(148, 163, 184, 0.2);
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
 .search-box input {
     width: 100%;
     padding: 0.7rem 0.9rem;
@@ -324,6 +366,26 @@ body {
     flex-direction: column;
     gap: 0.8rem;
     padding-right: 0.5rem;
+    max-height: 60vh;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
+}
+
+.codes-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.codes-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.codes-container::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.5);
+    border-radius: 3px;
+}
+
+.codes-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.7);
 }
 
 .code-card {
@@ -333,6 +395,15 @@ body {
     background: rgba(249, 250, 255, 0.85);
     cursor: pointer;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
+    display: block;
+    width: 100%;
+    text-align: left;
+    outline: none;
+}
+
+.code-card:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
 }
 
 .codes-container .empty-state {
@@ -346,6 +417,20 @@ body {
     transform: translateX(-4px);
     box-shadow: 0 10px 30px rgba(67, 97, 238, 0.15);
     border-color: rgba(99, 102, 241, 0.4);
+}
+
+.code-card.active {
+    background: rgba(37, 99, 235, 0.92);
+    color: #fff;
+    border-color: rgba(37, 99, 235, 0.6);
+}
+
+.code-card.active .code {
+    color: #fff;
+}
+
+.code-card.active .description {
+    color: rgba(255, 255, 255, 0.85);
 }
 
 .code-card header {
@@ -365,6 +450,11 @@ body {
     padding: 0.2rem 0.6rem;
     font-size: 0.8rem;
     color: var(--primary-dark);
+}
+
+.code-card.active .probability {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
 }
 
 .code-card .code {
@@ -397,6 +487,16 @@ body {
     cursor: default;
 }
 
+.code-card.active .code-add-btn:not(:disabled) {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.45);
+    color: #fff;
+}
+
+.code-card.active .code-add-btn:not(:disabled):hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+
 .code-card .description {
     margin: 0.6rem 0;
     color: var(--muted);
@@ -416,6 +516,11 @@ body {
     border-radius: 12px;
     font-size: 0.82rem;
     color: var(--text);
+}
+
+.code-card.active .token-badge {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
 }
 
 .finalized-container {
@@ -451,6 +556,19 @@ body {
 .final-code-info .code {
     font-weight: 600;
     font-size: 0.95rem;
+}
+
+.code-type {
+    display: inline-block;
+    background: var(--primary);
+    color: #fff;
+    padding: 0.15rem 0.4rem;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-right: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .final-code-info {
