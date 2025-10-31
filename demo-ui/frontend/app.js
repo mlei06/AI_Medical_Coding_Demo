@@ -13,6 +13,7 @@ const state = {
     mode: "local",
     llmModel: "",
     reasoning: "",
+    icdVersion: "9", // "9" or "10" - default to ICD-9
 };
 
 const highlightClasses = ["highlight-1", "highlight-2", "highlight-3", "highlight-4"];
@@ -48,6 +49,8 @@ const elements = {
     modelSelectWrapper: document.getElementById("modelSelectWrapper"),
     methodSelectWrapper: document.getElementById("methodSelectWrapper"),
     thresholdWrapper: document.getElementById("thresholdWrapper"),
+    icdVersionToggle: document.getElementById("icdVersionToggle"),
+    icdVersionWrapper: document.getElementById("icdVersionWrapper"),
     codeTabs: document.getElementById("codeTabs"),
     icdTab: document.getElementById("icdTab"),
     cptTab: document.getElementById("cptTab"),
@@ -604,6 +607,28 @@ function populateSelect(selectElement, values) {
     });
 }
 
+function filterModelsByICDVersion(models, icdVersion) {
+    if (!Array.isArray(models) || models.length === 0) {
+        return models;
+    }
+    const versionStr = icdVersion === "9" ? "icd9" : "icd10";
+    return models.filter(model => {
+        const modelLower = String(model).toLowerCase();
+        return modelLower.includes(versionStr);
+    });
+}
+
+function filterAndPopulateModels() {
+    const filtered = filterModelsByICDVersion(state.models, state.icdVersion);
+    if (filtered.length === 0 && state.models.length > 0) {
+        // If no models match, show all models but warn user
+        populateSelect(elements.modelSelect, state.models);
+        setStatus(`No ${state.icdVersion === "9" ? "ICD-9" : "ICD-10"} models found. Showing all models.`, "error");
+    } else {
+        populateSelect(elements.modelSelect, filtered);
+    }
+}
+
 async function fetchOptions() {
     try {
         setStatus("Loading configuration...", "loading");
@@ -630,7 +655,7 @@ async function fetchOptions() {
             state.methods = ["grad_attention"];
         }
 
-        populateSelect(elements.modelSelect, state.models);
+        filterAndPopulateModels();
         populateSelect(elements.methodSelect, state.methods);
 
         setStatus("Configuration loaded. Ready when you are.", "success");
@@ -639,7 +664,7 @@ async function fetchOptions() {
         // Use fallback values even if server is not available
         state.models = ["roberta-base-pm-m3-voc-hf"];
         state.methods = ["grad_attention"];
-        populateSelect(elements.modelSelect, state.models);
+        filterAndPopulateModels();
         populateSelect(elements.methodSelect, state.methods);
         setStatus("Using fallback configuration. Server may not be running.", "error");
     }
@@ -809,6 +834,7 @@ async function submitPrediction() {
         if (llmModelName) {
             payload.model = llmModelName;
         }
+        payload.icd_version = state.icdVersion;
     } else {
         const model = elements.modelSelect.value;
         if (!model) {
@@ -1109,6 +1135,26 @@ function resetAll() {
 }
 
 function initEvents() {
+    if (elements.icdVersionToggle) {
+        elements.icdVersionToggle.addEventListener("change", (event) => {
+            // When checked (thumb on right) = ICD-10, when unchecked (thumb on left) = ICD-9
+            const newVersion = event.target.checked ? "10" : "9";
+            if (state.icdVersion !== newVersion) {
+                state.icdVersion = newVersion;
+                filterAndPopulateModels();
+                clearCodes();
+                clearFinalizedCodes();
+                renderNote();
+                setStatus(
+                    `Switched to ICD-${newVersion}. Model list updated.`,
+                    "info"
+                );
+            }
+        });
+        // Initialize toggle state: ICD-9 = unchecked (thumb on left), ICD-10 = checked (thumb on right)
+        elements.icdVersionToggle.checked = state.icdVersion === "10";
+    }
+
     if (elements.modeSelect) {
         elements.modeSelect.addEventListener("change", (event) => {
             const newMode = event.target.value === "llm" ? "llm" : "local";
