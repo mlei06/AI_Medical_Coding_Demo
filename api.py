@@ -7,7 +7,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from utils.explainer_service import EXPLAIN_METHODS, predict_explain as run_prediction
+from utils.PLM_explainer_service import EXPLAIN_METHODS, predict_explain as run_prediction
 from utils.llm_explainer import LLMGenerationError, predict_codes_with_llm
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -63,6 +63,7 @@ class LlmOptions(BaseModel):
 class LlmPredictRequest(BaseModel):
     note: str
     model_name: Optional[str] = Field(default=None, alias="model")
+    icd_version: Optional[str] = Field(default="9", description="ICD version: '9' or '10'")
     options: Optional[LlmOptions] = None
 
     model_config = ConfigDict(populate_by_name=True)
@@ -138,6 +139,7 @@ def predict_explain_with_llm(body: LlmPredictRequest):
         result = predict_codes_with_llm(
             note=body.note,
             model_name=body.model_name,
+            icd_version=body.icd_version,
             extras=extras,
         )
     except ValueError as exc:

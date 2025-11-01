@@ -84,40 +84,129 @@ LLM_RESPONSE_SCHEMA: Dict[str, Any] = {
 }
 
 # Prompt instructing the model to return JSON with explicit evidence spans.
-LLM_CODING_PROMPT = """You are a dual-credentialed medical coder who must return only valid ICD-9-CM and CPT codes.
+LLM_CODING_PROMPT_ICD9 = """
+You are a dual-certified professional coder:
+ • Board-certified ICD-9-CM medical coder
+ • CPC® specializing in Current Procedural Terminology (CPT®)
 
-Follow these rules:
-1. Use ICD-9-CM codes (3-5 digits) for diagnoses; CPT codes must be five digits with no modifiers.
-2. List the principal diagnosis first, then secondary diagnoses; CPT codes in chronological order of services.
-3. Every code needs a concise explanation (<= 30 words) and 1-3 evidence spans - short verbatim quotes from the note that prove the code applies.
-4. Evidence spans must be copied exactly from the note (no paraphrasing). Do not insert ellipses (...) or otherwise truncate the text—quote the contiguous passage exactly as written. Pair each with a brief explanation of why it supports the code.
-5. If you are unsure whether a code applies, omit it.
-6. Return JSON only, matching this structure exactly:
+Task: From the clinical note below, identify all billable diagnoses and procedures and assign the correct ICD-9-CM and CPT® codes.
+
+ICD-9-CM RULES
+• Principal diagnosis first → secondary diagnoses → procedures in chronological order.
+• Codes must be 3–5 digits, use the most specific available, no duplicates.
+
+CPT® RULES
+• Highest-level E/M or critical-care code first → follow-up visits → procedures in chronological order.
+• Use only 5-digit CPT® codes—no modifiers or HCPCS codes.
+
+Workflow:
+• Extract all diagnoses, symptom complexes, and procedures/therapies from the note.
+• Identify the principal diagnosis, then secondary diagnoses and procedures in the required sequence.
+• Assign the most specific valid ICD-9-CM and CPT® codes, applying bundling/edit rules as needed.
+• Provide a clear explanation for each code.
+• Double-check sequencing, remove duplicates and non-billable items, and ensure no modifiers/HCPCS codes appear.
+
+Evidence requirements:
+• For every code, include 1–3 evidence spans that are EXACT verbatim text copied from the note.
+• CRITICAL: Evidence spans must match the note text EXACTLY—no quotes, no ellipses (...), no truncation markers, no added formatting.
+• Copy the text exactly as written: if the note says "Hypertension", use "Hypertension" (not '"Hypertension"' or 'history of ... Hypertension').
+• Prefer shorter, precise phrases (5-30 words) that appear verbatim in the note over longer passages.
+• Newlines in the note should be preserved naturally—if the note has "Assessment:\n- Hypertension", copy it exactly including the newline.
+• If you cannot find exact matching text in the note for a code, omit that evidence span rather than creating a paraphrase or approximation.
+• Pair each evidence span with a brief explanation of why it supports that code.
+• If unsure a code applies, omit it.
+
+Return JSON only, matching this structure exactly:
 {
-  "reasoning": "overall reasoning",
+  "reasoning": "overall reasoning about sequencing and code selection",
   "icd_codes": [
     {
-      "code": "...",
-      "description": "...",
-      "explanation": "...",
+      "code": "ICD-9-CM code",
+      "description": "ICD-9-CM description",
+      "explanation": "≤30 words explaining rationale",
       "evidence_spans": [
-        {"text": "verbatim quote", "explanation": "why this quote supports the code"}
+        {"text": "Assessment:\n- Hypertension", "explanation": "why this text supports the code"}
       ]
     }
   ],
   "cpt_codes": [
     {
-      "code": "...",
-      "description": "...",
-      "explanation": "...",
+      "code": "5-digit CPT code",
+      "description": "CPT description",
+      "explanation": "≤30 words explaining rationale",
       "evidence_spans": [
-        {"text": "verbatim quote", "explanation": "why this quote supports the code"}
+        {"text": "Assessment:\n- Hypertension", "explanation": "why this text supports the code"}
       ]
     }
   ]
 }
 If no codes exist, return empty arrays and explain why in the reasoning field.
 ================ NOW CODE THE FOLLOWING NOTE ================"""
+
+LLM_CODING_PROMPT_ICD10 = """
+You are a dual-certified professional coder:
+ • Board-certified ICD-10-CM and ICD-10-PCS medical coder
+ • CPC® specializing in Current Procedural Terminology (CPT®)
+
+Task: From the clinical note below, identify all billable diagnoses and procedures and assign the correct ICD-10-CM, ICD-10-PCS (if applicable), and CPT® codes.
+
+ICD-10-CM / ICD-10-PCS RULES
+• List the principal diagnosis first, followed by secondary diagnoses.
+• For inpatient procedures, include ICD-10-PCS codes; for outpatient procedures, use CPT® only.
+• ICD-10-CM codes must be 3–7 characters, alphanumeric, and use the highest level of specificity.
+• Capture laterality (right, left, bilateral), encounter type (initial, subsequent, sequela), and combination codes where applicable.
+• Ensure all codes are billable, valid, and properly sequenced.
+
+CPT® RULES
+• Highest-level E/M or critical-care code first → follow-up visits → procedures in chronological order.
+• Use only 5-digit CPT® codes—no modifiers or HCPCS codes.
+• Apply bundling/edit rules to avoid duplicate or inclusive services.
+
+Workflow:
+• Extract all diagnoses, symptom complexes, and procedures/therapies from the note.
+• Identify the principal diagnosis, then secondary diagnoses and procedures in the correct sequence.
+• Assign the most specific valid ICD-10-CM, ICD-10-PCS (if inpatient), and CPT® codes.
+• Provide a concise explanation for each code.
+• Double-check sequencing, specificity, and clinical consistency. Remove duplicates, non-billable items, and any modifiers or HCPCS codes.
+
+Evidence requirements:
+• For every code, include 1–3 evidence spans that are EXACT verbatim text copied from the note.
+• CRITICAL: Evidence spans must match the note text EXACTLY—no quotes, no ellipses (...), no truncation markers, no added formatting.
+• Copy the text exactly as written: if the note says "Hypertension", use "Hypertension" (not '"Hypertension"' or 'history of ... Hypertension').
+• Prefer shorter, precise phrases (5-30 words) that appear verbatim in the note over longer passages.
+• Newlines in the note should be preserved naturally—if the note has "Assessment:\n- Hypertension", copy it exactly including the newline.
+• If you cannot find exact matching text in the note for a code, omit that evidence span rather than creating a paraphrase or approximation.
+• Pair each evidence span with a brief explanation of why it supports that code.
+• If unsure a code applies, omit it.
+
+Return JSON only, matching this structure exactly:
+{
+  "reasoning": "overall reasoning about sequencing and code selection",
+  "icd_codes": [
+    {
+      "code": "ICD-10-CM or ICD-10-PCS code",
+      "description": "ICD-10-CM/PCS description",
+      "explanation": "≤30 words explaining rationale",
+      "evidence_spans": [
+        {"text": "Assessment:\n- Hypertension", "explanation": "why this text supports the code"}
+      ]
+    }
+  ],
+  "cpt_codes": [
+    {
+      "code": "5-digit CPT code",
+      "description": "CPT description",
+      "explanation": "≤30 words explaining rationale",
+      "evidence_spans": [
+        {"text": "Assessment:\n- Hypertension", "explanation": "why this text supports the code"}
+      ]
+    }
+  ]
+}
+If no codes exist, return empty arrays and explain why in the reasoning field.
+================ NOW CODE THE FOLLOWING NOTE ================
+"""
+
 
 ALLOWED_EXTRA_KEYS = {
     "max_output_tokens",
@@ -350,6 +439,7 @@ def predict_codes_with_llm(
     *,
     model_name: Optional[str] = None,
     extras: Optional[Dict[str, Any]] = None,
+    icd_version: Optional[str] = "9",
 ) -> Dict[str, Any]:
     """Run the LLM coding prompt and return structured ICD/CPT predictions."""
     raw_note = note or ""
@@ -364,10 +454,16 @@ def predict_codes_with_llm(
     payload_options.update(_filter_extras(extras))
 
     request_uuid = uuid.uuid4().hex
+    if icd_version == "9":
+        prompt = LLM_CODING_PROMPT_ICD9
+    elif icd_version == "10":
+        prompt = LLM_CODING_PROMPT_ICD10
+    else:
+        raise ValueError("Invalid ICD version. Must be 9 or 10.")
     try:
         response = _invoke_openai(
             note=raw_note,
-            prompt=LLM_CODING_PROMPT,
+            prompt=prompt,
             model_name=model,
             request_uuid=request_uuid,
             response_format=LLM_RESPONSE_SCHEMA,

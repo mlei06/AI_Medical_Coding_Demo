@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 import dotenv
-from utils.explainer_service import EXPLAIN_METHODS, predict_explain as run_prediction
+from utils.PLM_explainer_service import EXPLAIN_METHODS, predict_explain as run_prediction
 from utils.llm_explainer import LLMGenerationError, predict_codes_with_llm
 dotenv.load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -43,8 +43,8 @@ def run_prediction_with_model(model = "models/forktrainedPLM_icd9", text: str = 
             cpt_codes_array.append(cpt_code['code'])
     return icd_codes_array, cpt_codes_array
 
-def run_prediction_with_llm(text: str = "", model_name: str = "gpt-5"):
-    result = predict_codes_with_llm(note=text, model_name=model_name)
+def run_prediction_with_llm(text: str = "", model_name: str = "gpt-5", icd_version: str = "9"):
+    result = predict_codes_with_llm(note=text, model_name=model_name, icd_version=icd_version)
     icd_codes_result = result['icd_codes']
     icd_codes_array = []
     if icd_codes_result is not None:
@@ -109,6 +109,12 @@ if __name__ == "__main__":
         model_name = input("Enter model name(default is gpt-5): ")
         if model_name == "":
             model_name = "gpt-5"
+        icd_version = input("Enter ICD version (9 or 10, default is 9): ")
+        if icd_version == "":
+            icd_version = "9"
+        if icd_version not in ["9", "10"]:
+            print(f"Invalid ICD version '{icd_version}'. Using default '9'.")
+            icd_version = "9"
         TP = 0
         FP = 0
         FN = 0
@@ -147,7 +153,7 @@ if __name__ == "__main__":
             print(f"raw diagnosis codes: {row['diagnosis_codes']}")
             print(f"raw procedure codes: {row['procedure_codes']}")
             print(f"Combined gold codes: {combined_gold_codes}")
-            predicted_icd_codes, predicted_cpt_codes = run_prediction_with_llm(text=text, model_name=model_name)
+            predicted_icd_codes, predicted_cpt_codes = run_prediction_with_llm(text=text, model_name=model_name, icd_version=icd_version)
             print(f"Predicted ICD codes: {predicted_icd_codes}")
             print(f"Predicted CPT codes: {predicted_cpt_codes}")
             for gold_diag_code in gold_diagnosis_codes:
