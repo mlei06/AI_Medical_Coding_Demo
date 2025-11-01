@@ -177,8 +177,16 @@ function clearFinalizedCodes() {
     }
 }
 
-function removeFinalizedCode(code) {
-    state.finalizedCodes = state.finalizedCodes.filter((entry) => entry.code !== code);
+function removeFinalizedCode(code, codeType) {
+    state.finalizedCodes = state.finalizedCodes.filter((entry) => {
+        if (entry.code !== code) {
+            return true;
+        }
+        if (!codeType) {
+            return false;
+        }
+        return entry.type !== codeType;
+    });
     renderFinalizedCodes();
     if (state.icdCodes.length || state.cptCodes.length) {
         renderCodes("icd");
@@ -186,7 +194,7 @@ function removeFinalizedCode(code) {
     }
 }
 
-function renderFinalizedCodes() {
+function renderFinalizedCodes(focusIndex = null) {
     if (!elements.finalizedContainer) {
         return;
     }
@@ -202,9 +210,13 @@ function renderFinalizedCodes() {
     }
 
     elements.finalizedContainer.innerHTML = "";
-    state.finalizedCodes.forEach((entry) => {
+    state.finalizedCodes.forEach((entry, index) => {
         const card = document.createElement("div");
         card.className = "final-code-card";
+        if (entry.editing) {
+            card.classList.add("editing");
+        }
+        card.tabIndex = 0;
 
         const info = document.createElement("div");
         info.className = "final-code-info";
@@ -213,13 +225,76 @@ function renderFinalizedCodes() {
         codeEl.className = "code";
         const codeType = entry.type || "icd";
         codeEl.innerHTML = `<span class="code-type">${codeType.toUpperCase()}</span> ${entry.code}`;
+        card.setAttribute("role", "group");
+        card.setAttribute(
+            "aria-label",
+            `${codeType.toUpperCase()} code ${entry.code} finalized entry`
+        );
+        card.setAttribute("aria-expanded", entry.editing ? "true" : "false");
 
-        const descEl = document.createElement("div");
-        descEl.className = "description";
-        descEl.textContent = entry.description || "";
+        const activateEditor = () => {
+            if (state.finalizedCodes[index]?.editing) {
+                return;
+            }
+            state.finalizedCodes = state.finalizedCodes.map((item, idx) => ({
+                ...item,
+                editing: idx === index,
+            }));
+            renderFinalizedCodes(index);
+        };
 
         info.appendChild(codeEl);
-        info.appendChild(descEl);
+
+        if (entry.editing) {
+            const descInput = document.createElement("textarea");
+            descInput.className = "final-code-description";
+            descInput.rows = Math.max(2, (entry.description || "").split("\n").length);
+            descInput.value = entry.description || "";
+            descInput.placeholder = "Add or edit description";
+            descInput.setAttribute(
+                "aria-label",
+                `${codeType.toUpperCase()} ${entry.code} description editor`
+            );
+            descInput.addEventListener("input", (event) => {
+                state.finalizedCodes[index].description = event.target.value;
+            });
+            descInput.addEventListener("keydown", (event) => {
+                if (event.key === "Escape") {
+                    event.preventDefault();
+                    state.finalizedCodes[index].editing = false;
+                    renderFinalizedCodes();
+                } else if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    descInput.blur();
+                }
+            });
+            descInput.addEventListener("blur", (event) => {
+                const trimmed = event.target.value.trim();
+                state.finalizedCodes[index].description = trimmed;
+                state.finalizedCodes[index].editing = false;
+                renderFinalizedCodes();
+            });
+
+            if (focusIndex === index) {
+                requestAnimationFrame(() => {
+                    descInput.focus();
+                    const length = descInput.value.length;
+                    descInput.setSelectionRange(length, length);
+                });
+            }
+
+            info.appendChild(descInput);
+        } else {
+            const descEl = document.createElement("div");
+            descEl.className = "description";
+            const hasDescription =
+                typeof entry.description === "string" && entry.description.trim().length > 0;
+            descEl.textContent = hasDescription ? entry.description : "Click to add description";
+            if (!hasDescription) {
+                descEl.classList.add("placeholder");
+            }
+            info.appendChild(descEl);
+        }
 
         if (typeof entry.probability === "number" && !Number.isNaN(entry.probability)) {
             const probabilityEl = document.createElement("div");
@@ -233,7 +308,30 @@ function renderFinalizedCodes() {
         removeBtn.className = "final-code-remove";
         removeBtn.title = "Remove code";
         removeBtn.textContent = "×";
-        removeBtn.addEventListener("click", () => removeFinalizedCode(entry.code));
+        removeBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            removeFinalizedCode(entry.code, codeType);
+        });
+
+        card.addEventListener("click", (event) => {
+            if (event.target.closest(".final-code-remove")) {
+                return;
+            }
+            if (event.target.matches("textarea.final-code-description")) {
+                return;
+            }
+            activateEditor();
+        });
+
+        card.addEventListener("keydown", (event) => {
+            if (event.target.matches("textarea.final-code-description")) {
+                return;
+            }
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                activateEditor();
+            }
+        });
 
         card.appendChild(info);
         card.appendChild(removeBtn);
@@ -259,6 +357,7 @@ function addFinalizedCode(entry) {
         description: entry.description ?? "",
         probability: entry.probability ?? null,
         type: codeType,
+        editing: false,
     });
     renderFinalizedCodes();
 }
@@ -275,7 +374,7 @@ function decodeTokenFragment(token) {
             .replace(/\u00C2\u0120/g, " ")
     );
 }
-const QUOTE_TRIM_REGEX = /^[\"'“”‘’«»‹›„‟]+|[\"'“”‘’«»‹›„‟]+$/g;
+const QUOTE_TRIM_REGEX = /^["'\u201C\u201D\u2018\u2019\u00AB\u00BB\u2039\u203A\u201E\u201F]+|["'\u201C\u201D\u2018\u2019\u00AB\u00BB\u2039\u203A\u201E\u201F]+$/g;
 const TRAILING_PUNCT_REGEX = /[.,;:!?]+$/;
 
 function generateSpanCandidates(text) {
