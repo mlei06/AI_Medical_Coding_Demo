@@ -82,28 +82,71 @@
             </section>
             <aside class="sidebar">
                 <div class="sidebar-header">
-                    <h2>Selected Codes</h2>
-                    <p>Hover a code to highlight important tokens.</p>
+                    <h2>Assigned Codes</h2>
+                    <p>choose from AI suggested codes and/or manually add your own.</p>
                 </div>
                 <div class="sidebar-section suggestions">
-                    <div class="section-header">
-                        <h3>AI Suggested Codes</h3>
-                    </div>
                     <div class="code-tabs" id="codeTabs">
                         <button id="icdTab" class="tab-button active" data-tab="icd">ICD Codes</button>
                         <button id="cptTab" class="tab-button" data-tab="cpt">CPT Codes</button>
                     </div>
                     <div id="icdTabContent" class="tab-content active">
-                        <div class="search-box">
-                            <input id="codeSearch" type="search" placeholder="Search ICD codes...">
-                        </div>
-                        <div id="codesContainer" class="codes-container"></div>
+                        <section class="lookup-panel" aria-labelledby="manualLookupTitle-icd">
+                            <div class="method-header">
+                                <span class="method-icon" aria-hidden="true">🔎</span>
+                                <div>
+                                    <h3 id="manualLookupTitle-icd">Manual Lookup</h3>
+                                    <p class="method-subtitle">Search the official ICD code set or add a custom code directly.</p>
+                                </div>
+                            </div>
+                            <div class="search-box">
+                                <div class="code-search-wrapper">
+                                    <input id="codeSearch" type="search" placeholder="Look up an ICD code or description…">
+                                    <button id="codeSearchAddBtn" type="button" class="code-search-add-btn" disabled>Add</button>
+                                    <div id="codeSearchResults" class="code-search-results hidden" role="listbox" aria-label="ICD code search results"></div>
+                                </div>
+                                <p class="code-search-hint">Press Enter or Add to keep a code even if it’s not found in the catalog.</p>
+                            </div>
+                        </section>
+                        <section class="ai-panel" aria-labelledby="aiSuggestedTitle-icd">
+                            <div class="method-header">
+                                <span class="method-icon" aria-hidden="true">🤖</span>
+                                <div>
+                                    <h3 id="aiSuggestedTitle-icd">AI Suggested ICD Codes</h3>
+                                    <p class="method-subtitle">Review suggestions, explore highlights, then use the + button to send them to Finalized Codes.</p>
+                                </div>
+                            </div>
+                            <div id="codesContainer" class="codes-container"></div>
+                        </section>
                     </div>
                     <div id="cptTabContent" class="tab-content">
-                        <div class="search-box">
-                            <input id="cptCodeSearch" type="search" placeholder="Search CPT codes...">
-                        </div>
-                        <div id="cptCodesContainer" class="codes-container"></div>
+                        <section class="lookup-panel" aria-labelledby="manualLookupTitle-cpt">
+                            <div class="method-header">
+                                <span class="method-icon" aria-hidden="true">🛠️</span>
+                                <div>
+                                    <h3 id="manualLookupTitle-cpt">Manual Lookup</h3>
+                                    <p class="method-subtitle">Search CPT descriptions or enter a procedure code yourself.</p>
+                                </div>
+                            </div>
+                            <div class="search-box">
+                                <div class="code-search-wrapper">
+                                    <input id="cptCodeSearch" type="search" placeholder="Look up a CPT code or description…">
+                                    <button id="cptSearchAddBtn" type="button" class="code-search-add-btn" disabled>Add</button>
+                                    <div id="cptSearchResults" class="code-search-results hidden" role="listbox" aria-label="CPT code search results"></div>
+                                </div>
+                                <p class="code-search-hint">Not listed? Press Enter or Add to capture the code exactly as you typed it.</p>
+                            </div>
+                        </section>
+                        <section class="ai-panel" aria-labelledby="aiSuggestedTitle-cpt">
+                            <div class="method-header">
+                                <span class="method-icon" aria-hidden="true">🤖</span>
+                                <div>
+                                    <h3 id="aiSuggestedTitle-cpt">AI Suggested CPT Codes</h3>
+                                    <p class="method-subtitle">Click any suggestion to preview evidence, then tap + to move it into Finalized Codes.</p>
+                                </div>
+                            </div>
+                            <div id="cptCodesContainer" class="codes-container"></div>
+                        </section>
                     </div>
                 </div>
                 <div class="sidebar-section finalized">

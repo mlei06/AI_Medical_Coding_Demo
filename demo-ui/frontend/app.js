@@ -14,9 +14,31 @@ const state = {
     llmModel: "",
     reasoning: "",
     icdVersion: "9", // "9" or "10" - default to ICD-9
+    codeSearch: {
+        icd: {
+            term: "",
+            results: [],
+            activeIndex: -1,
+            loading: false,
+            seq: 0,
+        },
+        cpt: {
+            term: "",
+            results: [],
+            activeIndex: -1,
+            loading: false,
+            seq: 0,
+        },
+    },
 };
 
 const highlightClasses = ["highlight-1", "highlight-2", "highlight-3", "highlight-4"];
+
+const CODE_SEARCH_DEBOUNCE_MS = 250;
+const codeSearchTimers = {
+    icd: { debounce: null, blur: null },
+    cpt: { debounce: null, blur: null },
+};
 
 const elements = {
     noteInput: document.getElementById("noteInput"),
@@ -40,7 +62,11 @@ const elements = {
     finalizedContainer: document.getElementById("finalizedContainer"),
     statusBar: document.getElementById("statusBar"),
     searchInput: document.getElementById("codeSearch"),
+    codeSearchResults: document.getElementById("codeSearchResults"),
+    codeSearchAddBtn: document.getElementById("codeSearchAddBtn"),
     cptSearchInput: document.getElementById("cptCodeSearch"),
+    cptSearchResults: document.getElementById("cptSearchResults"),
+    cptSearchAddBtn: document.getElementById("cptSearchAddBtn"),
     noteFilename: document.getElementById("noteFilename"),
     modeSelect: document.getElementById("modeSelect"),
     modeSelectWrapper: document.getElementById("modeSelectWrapper"),
@@ -137,6 +163,20 @@ function setProcessing(isProcessing, target = "predict") {
 
 function normalizeNote(text) {
     return (text || "").replace(/\r\n?/g, "\n");
+}
+
+function inferIcdVersionFromModel(modelPath) {
+    const normalized = (modelPath || "").toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+    if (normalized.includes("icd-10") || normalized.includes("icd10")) {
+        return "10";
+    }
+    if (normalized.includes("icd-9") || normalized.includes("icd9")) {
+        return "9";
+    }
+    return null;
 }
 
 function displayNoteFilename() {
@@ -357,6 +397,8 @@ function addFinalizedCode(entry) {
         description: entry.description ?? "",
         probability: entry.probability ?? null,
         type: codeType,
+        spans: Array.isArray(entry.spans) ? entry.spans : [],
+        icdVersion: entry.icdVersion ?? null,
         editing: false,
     });
     renderFinalizedCodes();
@@ -790,22 +832,12 @@ function clearCodes() {
 function renderCodes(codeType = "icd") {
     const codes = codeType === "icd" ? state.icdCodes : state.cptCodes;
     const container = codeType === "icd" ? elements.codesContainer : elements.cptCodesContainer;
-    const searchInput = codeType === "icd" ? elements.searchInput : elements.cptSearchInput;
     const selectedSet = codeType === "icd" ? state.selectedIcdCodeIds : state.selectedCptCodeIds;
-    
-    const searchTerm = searchInput.value.trim().toLowerCase();
-    const filtered = codes.filter((entry) => {
-        if (!searchTerm) {
-            return true;
-        }
-        const haystack = `${entry.code} ${entry.description}`.toLowerCase();
-        return haystack.includes(searchTerm);
-    });
+
+    const filtered = codes.slice();
 
     if (!filtered.length) {
-        const emptyMessage = searchTerm 
-            ? "No codes match that search." 
-            : `No ${codeType.toUpperCase()} predictions yet. Upload a note and submit to see results.`;
+        const emptyMessage = `No ${codeType.toUpperCase()} predictions yet. Upload a note and submit to see results.`;
         container.innerHTML = `<p class="empty-state">${emptyMessage}</p>`;
         selectedSet.clear();
         updateActiveHighlight();
@@ -910,6 +942,342 @@ function renderCodes(codeType = "icd") {
     updateSubmitCodesState();
 }
 
+function getCodeSearchElements(type) {
+    return type === "cpt"
+        ? {
+              input: elements.cptSearchInput,
+              results: elements.cptSearchResults,
+              addBtn: elements.cptSearchAddBtn,
+          }
+        : {
+              input: elements.searchInput,
+              results: elements.codeSearchResults,
+              addBtn: elements.codeSearchAddBtn,
+          };
+}
+
+function getCodeSearchState(type) {
+    return state.codeSearch[type];
+}
+
+function getCodeSearchTimers(type) {
+    return codeSearchTimers[type];
+}
+
+function getCodeSystemForSearch(type) {
+    if (type === "cpt") {
+        return "cpt";
+    }
+    return state.icdVersion === "10" ? "icd10" : "icd9";
+}
+
+function isSearchTabActive(type) {
+    return type === "cpt" ? state.activeTab === "cpt" : state.activeTab === "icd";
+}
+
+function updateCodeSearchAddState(type) {
+    const { addBtn } = getCodeSearchElements(type);
+    if (!addBtn) {
+        return;
+    }
+    const stateSlice = getCodeSearchState(type);
+    addBtn.disabled = !stateSlice.term.trim().length;
+}
+
+function renderCodeSearchResults(type) {
+    const { results: container } = getCodeSearchElements(type);
+    if (!container) {
+        return;
+    }
+
+    const stateSlice = getCodeSearchState(type);
+    const isActive = isSearchTabActive(type);
+
+    if (!isActive || !stateSlice.term.trim()) {
+        container.classList.add("hidden");
+        container.innerHTML = "";
+        return;
+    }
+
+    if (stateSlice.loading) {
+        container.innerHTML = `<div class="code-search-empty">Searching...</div>`;
+        container.classList.remove("hidden");
+        return;
+    }
+
+    const results = stateSlice.results;
+    if (!results.length) {
+        container.innerHTML = `<div class="code-search-empty">No matching codes found.</div>`;
+        container.classList.remove("hidden");
+        return;
+    }
+
+    container.innerHTML = "";
+    results.forEach((result, index) => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "code-search-option";
+        option.setAttribute("role", "option");
+        option.dataset.index = String(index);
+        if (index === stateSlice.activeIndex) {
+            option.classList.add("active");
+            option.setAttribute("aria-selected", "true");
+        } else {
+            option.setAttribute("aria-selected", "false");
+        }
+        const codeEl = document.createElement("span");
+        codeEl.className = "code";
+        codeEl.textContent = result.code;
+        const descEl = document.createElement("span");
+        descEl.className = "description";
+        descEl.textContent = result.description;
+        option.appendChild(codeEl);
+        option.appendChild(descEl);
+        option.addEventListener("mousedown", (event) => event.preventDefault());
+        option.addEventListener("click", () => addCodeFromSearchResult(type, result));
+        container.appendChild(option);
+    });
+
+    container.classList.remove("hidden");
+}
+
+function scheduleCodeSearch(type) {
+    const timers = getCodeSearchTimers(type);
+    if (timers.debounce) {
+        clearTimeout(timers.debounce);
+    }
+
+    const stateSlice = getCodeSearchState(type);
+    if (!stateSlice.term.trim()) {
+        stateSlice.results = [];
+        stateSlice.activeIndex = -1;
+        stateSlice.loading = false;
+        renderCodeSearchResults(type);
+        return;
+    }
+
+    stateSlice.loading = true;
+    renderCodeSearchResults(type);
+    timers.debounce = setTimeout(() => performCodeSearch(type), CODE_SEARCH_DEBOUNCE_MS);
+}
+
+async function performCodeSearch(type) {
+    const stateSlice = getCodeSearchState(type);
+    const timers = getCodeSearchTimers(type);
+
+    if (!stateSlice.term.trim() || !isSearchTabActive(type)) {
+        stateSlice.loading = false;
+        renderCodeSearchResults(type);
+        return;
+    }
+
+    const system = getCodeSystemForSearch(type);
+    const seq = ++stateSlice.seq;
+
+    try {
+        const response = await fetch(
+            `/code-search?system=${encodeURIComponent(system)}&q=${encodeURIComponent(stateSlice.term)}&limit=20`
+        );
+        if (!response.ok) {
+            throw new Error(`Search failed with status ${response.status}`);
+        }
+        const data = await response.json();
+        if (seq !== stateSlice.seq) {
+            return;
+        }
+        if (!isSearchTabActive(type)) {
+            stateSlice.loading = false;
+            return;
+        }
+        stateSlice.results = Array.isArray(data.results) ? data.results : [];
+        stateSlice.activeIndex = stateSlice.results.length ? 0 : -1;
+        stateSlice.loading = false;
+        renderCodeSearchResults(type);
+    } catch (error) {
+        if (seq !== stateSlice.seq) {
+            return;
+        }
+        console.warn("Code search failed:", error);
+        stateSlice.results = [];
+        stateSlice.activeIndex = -1;
+        stateSlice.loading = false;
+        if (isSearchTabActive(type)) {
+            renderCodeSearchResults(type);
+            setStatus("Failed to search code descriptions.", "error");
+        }
+    } finally {
+        timers.debounce = null;
+    }
+}
+
+function handleCodeSearchInput(type, event) {
+    const stateSlice = getCodeSearchState(type);
+    stateSlice.term = event.target.value || "";
+    updateCodeSearchAddState(type);
+    if (!isSearchTabActive(type)) {
+        return;
+    }
+    scheduleCodeSearch(type);
+}
+
+function handleCodeSearchFocus(type) {
+    const timers = getCodeSearchTimers(type);
+    if (timers.blur) {
+        clearTimeout(timers.blur);
+        timers.blur = null;
+    }
+    const stateSlice = getCodeSearchState(type);
+    if (stateSlice.term.trim()) {
+        renderCodeSearchResults(type);
+    }
+}
+
+function handleCodeSearchBlur(type) {
+    const timers = getCodeSearchTimers(type);
+    if (timers.blur) {
+        clearTimeout(timers.blur);
+    }
+    timers.blur = setTimeout(() => {
+        const { results: container } = getCodeSearchElements(type);
+        if (container) {
+            container.classList.add("hidden");
+        }
+    }, 150);
+}
+
+function moveCodeSearchSelection(type, offset) {
+    const stateSlice = getCodeSearchState(type);
+    const results = stateSlice.results;
+    if (!results.length) {
+        return;
+    }
+    let nextIndex = stateSlice.activeIndex + offset;
+    if (nextIndex < 0) {
+        nextIndex = results.length - 1;
+    } else if (nextIndex >= results.length) {
+        nextIndex = 0;
+    }
+    stateSlice.activeIndex = nextIndex;
+    renderCodeSearchResults(type);
+}
+
+function handleCodeSearchKeyDown(type, event) {
+    if ((type === "icd" && state.activeTab !== "icd") || (type === "cpt" && state.activeTab !== "cpt")) {
+        return;
+    }
+
+    const stateSlice = getCodeSearchState(type);
+
+    switch (event.key) {
+        case "ArrowDown":
+            if (stateSlice.results.length) {
+                event.preventDefault();
+                moveCodeSearchSelection(type, 1);
+            }
+            break;
+        case "ArrowUp":
+            if (stateSlice.results.length) {
+                event.preventDefault();
+                moveCodeSearchSelection(type, -1);
+            }
+            break;
+        case "Enter":
+            event.preventDefault();
+            if (stateSlice.results.length && stateSlice.activeIndex >= 0) {
+                const selected = stateSlice.results[stateSlice.activeIndex];
+                addCodeFromSearchResult(type, selected);
+            } else if (stateSlice.term.trim()) {
+                addManualCodeFromSearch(type, stateSlice.term.trim());
+            }
+            break;
+        case "Escape":
+            resetCodeSearch(type);
+            break;
+        default:
+            break;
+    }
+}
+
+function addCodeFromSearchResult(type, result) {
+    if (!result || !result.code) {
+        return;
+    }
+    const codeType = type === "cpt" ? "cpt" : "icd";
+    const priorLength = state.finalizedCodes.length;
+    addFinalizedCode({
+        code: result.code,
+        description: result.description ?? "",
+        probability: null,
+        type: codeType,
+        spans: [],
+        icdVersion: codeType === "icd" ? state.icdVersion : null,
+    });
+    if (state.finalizedCodes.length > priorLength) {
+        if (codeType === "icd") {
+            setStatus(`Added ICD-${state.icdVersion} code ${result.code} from dictionary.`, "success");
+        } else {
+            setStatus(`Added CPT code ${result.code} from dictionary.`, "success");
+        }
+        resetCodeSearch(type);
+    }
+}
+
+function addManualCodeFromSearch(type, rawCode) {
+    const code = rawCode.trim();
+    if (!code.length) {
+        return;
+    }
+    const normalized = code.toUpperCase();
+    const codeType = type === "cpt" ? "cpt" : "icd";
+    const priorLength = state.finalizedCodes.length;
+    addFinalizedCode({
+        code: normalized,
+        description: "",
+        probability: null,
+        type: codeType,
+        spans: [],
+        icdVersion: codeType === "icd" ? state.icdVersion : null,
+    });
+    if (state.finalizedCodes.length > priorLength) {
+        if (codeType === "icd") {
+            setStatus(`Added ICD-${state.icdVersion} code ${normalized}.`, "success");
+        } else {
+            setStatus(`Added CPT code ${normalized}.`, "success");
+        }
+        resetCodeSearch(type);
+    }
+}
+
+function resetCodeSearch(type, keepValue = false) {
+    const stateSlice = getCodeSearchState(type);
+    const timers = getCodeSearchTimers(type);
+    const { input, results } = getCodeSearchElements(type);
+
+    stateSlice.loading = false;
+    stateSlice.results = [];
+    stateSlice.activeIndex = -1;
+    if (!keepValue) {
+        stateSlice.term = "";
+        if (input) {
+            input.value = "";
+        }
+    }
+    updateCodeSearchAddState(type);
+
+    if (timers.debounce) {
+        clearTimeout(timers.debounce);
+        timers.debounce = null;
+    }
+    if (timers.blur) {
+        clearTimeout(timers.blur);
+        timers.blur = null;
+    }
+    if (results) {
+        results.classList.add("hidden");
+        results.innerHTML = "";
+    }
+}
+
 async function submitPrediction() {
     const rawNote = elements.noteInput.value;
     const normalizedNote = normalizeNote(rawNote);
@@ -925,6 +1293,7 @@ async function submitPrediction() {
         note: state.noteText,
     };
     let endpoint = "/predict-explain";
+    let selectedModel = "";
 
     if (useLLM) {
         endpoint = "/predict-explain-llm";
@@ -948,6 +1317,7 @@ async function submitPrediction() {
         payload.explain_method = method;
         payload.confidence_threshold = threshold;
         elements.thresholdInput.value = threshold.toString();
+        selectedModel = model;
     }
 
     try {
@@ -977,6 +1347,7 @@ async function submitPrediction() {
 
         const icdCodes = Array.isArray(data.icd_codes) ? data.icd_codes : [];
         const cptCodes = Array.isArray(data.cpt_codes) ? data.cpt_codes : [];
+        const inferredIcdVersion = useLLM ? state.icdVersion : inferIcdVersionFromModel(selectedModel);
         
         if (!icdCodes.length && !cptCodes.length) {
             setStatus(
@@ -1038,6 +1409,7 @@ async function submitPrediction() {
                 tokens,
                 spans,
                 source: useLLM ? "llm" : "local",
+                icdVersion: inferredIcdVersion || null,
             };
         });
 
@@ -1089,6 +1461,7 @@ async function submitPrediction() {
                 tokens,
                 spans,
                 source: useLLM ? "llm" : "local",
+                icdVersion: null,
             };
         });
 
@@ -1138,23 +1511,48 @@ async function submitFinalizedCodes() {
             : `manual-note-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
     state.noteFileName = effectiveFileName;
 
-    // Separate ICD and CPT codes
-    const icdCodes = state.finalizedCodes.filter(entry => entry.type === "icd");
-    const cptCodes = state.finalizedCodes.filter(entry => entry.type === "cpt");
+    const codesPayload = state.finalizedCodes.map((entry) => {
+        const codeType = (entry.type || "icd").toLowerCase();
+        const spans = Array.isArray(entry.spans)
+            ? entry.spans
+                  .map((span) => {
+                      if (!span || typeof span !== "object") {
+                          return null;
+                      }
+                      const sanitized = {};
+                      const start = Number(span.start);
+                      if (Number.isFinite(start)) {
+                          sanitized.start = Math.trunc(start);
+                      }
+                      const end = Number(span.end);
+                      if (Number.isFinite(end)) {
+                          sanitized.end = Math.trunc(end);
+                      }
+                      if (typeof span.text === "string") {
+                          sanitized.text = span.text;
+                      }
+                      return Object.keys(sanitized).length ? sanitized : null;
+                  })
+                  .filter(Boolean)
+            : [];
+
+        return {
+            code: entry.code,
+            code_type: codeType,
+            description: entry.description ?? "",
+            probability: entry.probability,
+            icd_version: codeType === "icd" ? (entry.icdVersion || null) : null,
+            evidence_spans: spans,
+        };
+    });
+
+    const icdCount = codesPayload.filter((entry) => entry.code_type === "icd").length;
+    const cptCount = codesPayload.filter((entry) => entry.code_type === "cpt").length;
 
     const payload = {
         note_text: state.noteText,
         note_filename: effectiveFileName,
-        icd_codes: icdCodes.map((entry) => ({
-            code: entry.code,
-            description: entry.description ?? "",
-            probability: entry.probability,
-        })),
-        cpt_codes: cptCodes.map((entry) => ({
-            code: entry.code,
-            description: entry.description ?? "",
-            probability: entry.probability,
-        })),
+        codes: codesPayload,
     };
 
     try {
@@ -1173,16 +1571,48 @@ async function submitFinalizedCodes() {
         }
 
         const data = await response.json();
-        const outputPath = data.output_path || "output";
-        const icdCount = icdCodes.length;
-        const cptCount = cptCodes.length;
-        let message = `Codes submitted successfully. Saved to ${outputPath}.`;
-        if (icdCount > 0 && cptCount > 0) {
-            message += ` Created separate files: ${icdCount} ICD code${icdCount === 1 ? '' : 's'} and ${cptCount} CPT code${cptCount === 1 ? '' : 's'}.`;
-        } else if (icdCount > 0) {
-            message += ` Created ICD codes file with ${icdCount} code${icdCount === 1 ? '' : 's'}.`;
-        } else if (cptCount > 0) {
-            message += ` Created CPT codes file with ${cptCount} code${cptCount === 1 ? '' : 's'}.`;
+        const outputPathRaw = typeof data.output_path === "string" ? data.output_path : "output";
+        const counts = data && typeof data === "object" ? data.counts : null;
+        const icdSummaryCount =
+            counts && typeof counts.icd === "number" ? counts.icd : icdCount;
+        const cptSummaryCount =
+            counts && typeof counts.cpt === "number" ? counts.cpt : cptCount;
+        const icd9SummaryCount =
+            counts && typeof counts.icd9 === "number" ? counts.icd9 : null;
+        const icd10SummaryCount =
+            counts && typeof counts.icd10 === "number" ? counts.icd10 : null;
+        const icdUnknownSummaryCount =
+            counts && typeof counts.icd_unknown === "number" ? counts.icd_unknown : null;
+        const normalizedOutput = outputPathRaw.replace(/\\/g, "/").replace(/\/+$/, "");
+        const codesFileName =
+            data.codes_file ||
+            (Array.isArray(data.created_files)
+                ? data.created_files.find(
+                      (name) => typeof name === "string" && name.toLowerCase().endsWith(".json")
+                  )
+                : null) ||
+            "finalized_codes.json";
+        const outputFilePath = normalizedOutput ? `${normalizedOutput}/${codesFileName}` : codesFileName;
+
+        let message = `Codes submitted successfully. Saved to ${outputFilePath}.`;
+        const summaryParts = [];
+        if (icd9SummaryCount > 0) {
+            summaryParts.push(`${icd9SummaryCount} ICD-9 code${icd9SummaryCount === 1 ? "" : "s"}`);
+        }
+        if (icd10SummaryCount > 0) {
+            summaryParts.push(`${icd10SummaryCount} ICD-10 code${icd10SummaryCount === 1 ? "" : "s"}`);
+        }
+        if (!icd9SummaryCount && !icd10SummaryCount && icdSummaryCount > 0) {
+            summaryParts.push(`${icdSummaryCount} ICD code${icdSummaryCount === 1 ? "" : "s"}`);
+        }
+        if (icdUnknownSummaryCount > 0) {
+            summaryParts.push(`${icdUnknownSummaryCount} ICD (unspecified) code${icdUnknownSummaryCount === 1 ? "" : "s"}`);
+        }
+        if (cptSummaryCount > 0) {
+            summaryParts.push(`${cptSummaryCount} CPT code${cptSummaryCount === 1 ? "" : "s"}`);
+        }
+        if (summaryParts.length) {
+            message += ` Export covers ${summaryParts.join(" and ")}.`;
         }
         setStatus(message, "success");
     } catch (error) {
@@ -1207,14 +1637,17 @@ function switchTab(tabType) {
         elements.icdTabContent.classList.toggle("active", tabType === "icd");
         elements.cptTabContent.classList.toggle("active", tabType === "cpt");
     }
+
+    renderCodeSearchResults("icd");
+    renderCodeSearchResults("cpt");
+    updateCodeSearchAddState("icd");
+    updateCodeSearchAddState("cpt");
 }
 
 function resetAll() {
     elements.noteInput.value = "";
-    elements.searchInput.value = "";
-    if (elements.cptSearchInput) {
-        elements.cptSearchInput.value = "";
-    }
+    resetCodeSearch("icd");
+    resetCodeSearch("cpt");
     state.originalNoteText = "";
     state.noteText = "";
     state.noteFileName = null;
@@ -1240,6 +1673,7 @@ function initEvents() {
             const newVersion = event.target.checked ? "10" : "9";
             if (state.icdVersion !== newVersion) {
                 state.icdVersion = newVersion;
+                resetCodeSearch("icd");
                 filterAndPopulateModels();
                 clearCodes();
                 clearFinalizedCodes();
@@ -1321,13 +1755,39 @@ function initEvents() {
     }
 
     // Search event listeners
-    elements.searchInput.addEventListener("input", () => renderCodes("icd"));
+    if (elements.searchInput) {
+        elements.searchInput.addEventListener("input", (event) => handleCodeSearchInput("icd", event));
+        elements.searchInput.addEventListener("keydown", (event) => handleCodeSearchKeyDown("icd", event));
+        elements.searchInput.addEventListener("focus", () => handleCodeSearchFocus("icd"));
+        elements.searchInput.addEventListener("blur", () => handleCodeSearchBlur("icd"));
+    }
+    if (elements.codeSearchAddBtn) {
+        elements.codeSearchAddBtn.addEventListener("click", () => {
+            const { term } = getCodeSearchState("icd");
+            if (term.trim()) {
+                addManualCodeFromSearch("icd", term.trim());
+            }
+        });
+    }
     if (elements.cptSearchInput) {
-        elements.cptSearchInput.addEventListener("input", () => renderCodes("cpt"));
+        elements.cptSearchInput.addEventListener("input", (event) => handleCodeSearchInput("cpt", event));
+        elements.cptSearchInput.addEventListener("keydown", (event) => handleCodeSearchKeyDown("cpt", event));
+        elements.cptSearchInput.addEventListener("focus", () => handleCodeSearchFocus("cpt"));
+        elements.cptSearchInput.addEventListener("blur", () => handleCodeSearchBlur("cpt"));
+    }
+    if (elements.cptSearchAddBtn) {
+        elements.cptSearchAddBtn.addEventListener("click", () => {
+            const { term } = getCodeSearchState("cpt");
+            if (term.trim()) {
+                addManualCodeFromSearch("cpt", term.trim());
+            }
+        });
     }
     
     updateSubmitCodesState();
     updateModeUI();
+    updateCodeSearchAddState("icd");
+    updateCodeSearchAddState("cpt");
 }
 
 function boot() {
