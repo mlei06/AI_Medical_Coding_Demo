@@ -1,3 +1,15 @@
+// Common OpenAI models that work with the responses API
+const LLM_MODELS = [
+    "gpt-5",
+    "gpt-4o",
+    "gpt-4-turbo",
+    "gpt-4",
+    "gpt-4o-mini",
+    "o1-preview",
+    "o1-mini",
+    "gpt-3.5-turbo",
+];
+
 const state = {
     originalNoteText: "",
     noteText: "",
@@ -11,7 +23,7 @@ const state = {
     selectedCptCodeIds: new Set(),
     activeTab: "icd", // "icd" or "cpt"
     mode: "local",
-    llmModel: "",
+    llmModel: "gpt-5",
     reasoning: "",
     icdVersion: "9", // "9" or "10" - default to ICD-9
     codeSearch: {
@@ -71,7 +83,7 @@ const elements = {
     modeSelect: document.getElementById("modeSelect"),
     modeSelectWrapper: document.getElementById("modeSelectWrapper"),
     llmModelWrapper: document.getElementById("llmModelWrapper"),
-    llmModelInput: document.getElementById("llmModelInput"),
+    llmModelSelect: document.getElementById("llmModelSelect"),
     modelSelectWrapper: document.getElementById("modelSelectWrapper"),
     methodSelectWrapper: document.getElementById("methodSelectWrapper"),
     thresholdWrapper: document.getElementById("thresholdWrapper"),
@@ -119,9 +131,9 @@ function updateModeUI() {
     if (elements.thresholdInput) {
         elements.thresholdInput.disabled = useLLM;
     }
-    if (elements.llmModelInput) {
-        elements.llmModelInput.disabled = !useLLM;
-        elements.llmModelInput.value = state.llmModel;
+    if (elements.llmModelSelect) {
+        elements.llmModelSelect.disabled = !useLLM;
+        elements.llmModelSelect.value = state.llmModel || "gpt-5";
     }
 }
 
@@ -1297,7 +1309,7 @@ async function submitPrediction() {
 
     if (useLLM) {
         endpoint = "/predict-explain-llm";
-        const llmModelName = elements.llmModelInput ? elements.llmModelInput.value.trim() : "";
+        const llmModelName = elements.llmModelSelect ? elements.llmModelSelect.value.trim() : "gpt-5";
         state.llmModel = llmModelName;
         if (llmModelName) {
             payload.model = llmModelName;
@@ -1707,8 +1719,12 @@ function initEvents() {
         });
     }
 
-    if (elements.llmModelInput) {
-        elements.llmModelInput.addEventListener("input", (event) => {
+    if (elements.llmModelSelect) {
+        // Populate LLM model dropdown
+        populateSelect(elements.llmModelSelect, LLM_MODELS);
+        elements.llmModelSelect.value = state.llmModel || "gpt-5";
+        
+        elements.llmModelSelect.addEventListener("change", (event) => {
             state.llmModel = event.target.value;
         });
     }
