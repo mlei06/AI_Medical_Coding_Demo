@@ -81,6 +81,10 @@ const elements = {
     cptSearchAddBtn: document.getElementById("cptSearchAddBtn"),
     noteFilename: document.getElementById("noteFilename"),
     modeSelect: document.getElementById("modeSelect"),
+    folderNameModal: document.getElementById("folderNameModal"),
+    folderNameInput: document.getElementById("folderNameInput"),
+    folderNameSubmitBtn: document.getElementById("folderNameSubmitBtn"),
+    folderNameCancelBtn: document.getElementById("folderNameCancelBtn"),
     modeSelectWrapper: document.getElementById("modeSelectWrapper"),
     llmModelWrapper: document.getElementById("llmModelWrapper"),
     llmModelSelect: document.getElementById("llmModelSelect"),
@@ -692,12 +696,9 @@ function updateNote(text) {
     state.noteText = normalizeNote(state.originalNoteText);
     elements.noteInput.value = state.originalNoteText;
 
-    const hasText = state.noteText.trim().length > 0;
-    toggleSection(elements.noteEditorContainer, hasText);
-    
     // Only show note display container if there are codes to highlight
     const hasCodes = state.icdCodes.length > 0 || state.cptCodes.length > 0;
-    toggleSection(elements.noteDisplayContainer, hasText && hasCodes);
+    toggleSection(elements.noteDisplayContainer, hasCodes);
 
     if (state.icdCodes.length > 0 || state.cptCodes.length > 0) {
         clearCodes();
@@ -1369,6 +1370,7 @@ async function submitPrediction() {
                 "success"
             );
             clearCodes();
+            toggleSection(elements.dropZone, false);
             toggleSection(elements.noteEditorContainer, true);
             return;
         }
@@ -1479,6 +1481,7 @@ async function submitPrediction() {
 
         renderCodes("icd");
         renderCodes("cpt");
+        toggleSection(elements.dropZone, false);
         toggleSection(elements.noteEditorContainer, false);
         toggleSection(elements.noteDisplayContainer, true);
         renderNote();
@@ -1499,6 +1502,7 @@ async function submitPrediction() {
     } catch (error) {
         setStatus(`Prediction failed: ${error.message}`, "error");
         clearCodes();
+        toggleSection(elements.dropZone, false);
         toggleSection(elements.noteEditorContainer, true);
     } finally {
         setProcessing(false, "predict");
@@ -1506,7 +1510,30 @@ async function submitPrediction() {
     }
 }
 
-async function submitFinalizedCodes() {
+function showFolderNameModal() {
+    if (!elements.folderNameModal || !elements.folderNameInput) {
+        return;
+    }
+    elements.folderNameInput.value = "";
+    elements.folderNameModal.classList.remove("hidden");
+    elements.folderNameModal.setAttribute("aria-hidden", "false");
+    elements.folderNameInput.focus();
+}
+
+function hideFolderNameModal() {
+    if (!elements.folderNameModal) {
+        return;
+    }
+    elements.folderNameModal.classList.add("hidden");
+    elements.folderNameModal.setAttribute("aria-hidden", "true");
+}
+
+function sanitizeFolderName(name) {
+    // Only allow alphanumeric, dots, dashes, and underscores
+    return name.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^[._-]+|[._-]+$/g, "") || "output";
+}
+
+async function submitFinalizedCodes(folderName = null) {
     if (!state.finalizedCodes.length) {
         setStatus("Add at least one code before submitting.", "error");
         return;
@@ -1566,6 +1593,10 @@ async function submitFinalizedCodes() {
         note_filename: effectiveFileName,
         codes: codesPayload,
     };
+    
+    if (folderName && folderName.trim().length) {
+        payload.output_folder = sanitizeFolderName(folderName.trim());
+    }
 
     try {
         setStatus("Saving finalized codes...", "loading");
@@ -1672,7 +1703,8 @@ function resetAll() {
     clearCodes();
     clearFinalizedCodes();
     switchTab("icd");
-    toggleSection(elements.noteEditorContainer, false);
+    toggleSection(elements.dropZone, true);
+    toggleSection(elements.noteEditorContainer, true);
     toggleSection(elements.noteDisplayContainer, false);
     setProcessing(false, "predict");
     setStatus("Cleared inputs.", "success");
@@ -1754,7 +1786,48 @@ function initEvents() {
         elements.clearFinalizedBtn.addEventListener("click", clearFinalizedCodes);
     }
     if (elements.submitCodesBtn) {
-        elements.submitCodesBtn.addEventListener("click", submitFinalizedCodes);
+        elements.submitCodesBtn.addEventListener("click", () => {
+            if (!state.finalizedCodes.length) {
+                setStatus("Add at least one code before submitting.", "error");
+                return;
+            }
+            showFolderNameModal();
+        });
+    }
+    
+    if (elements.folderNameCancelBtn) {
+        elements.folderNameCancelBtn.addEventListener("click", hideFolderNameModal);
+    }
+    
+    if (elements.folderNameSubmitBtn) {
+        elements.folderNameSubmitBtn.addEventListener("click", () => {
+            const folderName = elements.folderNameInput ? elements.folderNameInput.value.trim() : "";
+            hideFolderNameModal();
+            submitFinalizedCodes(folderName);
+        });
+    }
+    
+    if (elements.folderNameInput) {
+        elements.folderNameInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                const folderName = elements.folderNameInput.value.trim();
+                hideFolderNameModal();
+                submitFinalizedCodes(folderName);
+            } else if (event.key === "Escape") {
+                event.preventDefault();
+                hideFolderNameModal();
+            }
+        });
+    }
+    
+    // Close modal when clicking outside
+    if (elements.folderNameModal) {
+        elements.folderNameModal.addEventListener("click", (event) => {
+            if (event.target === elements.folderNameModal) {
+                hideFolderNameModal();
+            }
+        });
     }
     elements.clearHighlightsBtn.addEventListener("click", () => {
         state.selectedIcdCodeIds.clear();

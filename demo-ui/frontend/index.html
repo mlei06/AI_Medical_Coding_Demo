@@ -61,9 +61,8 @@
                     <div class="drop-icon">?</div>
                     <p class="drop-title">Drag & Drop clinical note (.txt)</p>
                     <p class="drop-subtitle">or <button id="browseBtn" type="button" class="link-btn">browse your files</button></p>
-                    <p class="drop-hint">You can also edit the note below.</p>
                 </div>
-                <div class="note-editor-container hidden" id="noteEditorContainer">
+                <div class="note-editor-container" id="noteEditorContainer">
                     <div class="note-editor">
                         <label for="noteInput">Clinical Note</label>
                         <textarea id="noteInput" placeholder="Paste or type clinical note here..."></textarea>
@@ -169,6 +168,21 @@
             <div class="processing-card">
                 <div class="spinner" role="presentation"></div>
                 <p>Processing request...</p>
+            </div>
+        </div>
+        <div id="folderNameModal" class="modal-overlay hidden" aria-hidden="true">
+            <div class="modal-card">
+                <h2>Enter Admission ID</h2>
+                    <p class="modal-subtitle">Will be used as the folder name for this submission.</p>
+                    <div class="modal-input-group">
+                    <label for="folderNameInput">Admission ID:</label>
+                    <input type="text" id="folderNameInput" placeholder="e.g., patient-001, case-study-2024" autocomplete="off">
+                    <p class="modal-hint">Only letters, numbers, dots, dashes, and underscores are allowed.</p>
+                </div>
+                <div class="modal-actions">
+                    <button id="folderNameCancelBtn" type="button" class="modal-btn secondary">Cancel</button>
+                    <button id="folderNameSubmitBtn" type="button" class="modal-btn primary">Submit</button>
+                </div>
             </div>
         </div>
     </div>

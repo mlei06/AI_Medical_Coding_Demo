@@ -134,6 +134,7 @@ class FinalizedCode(BaseModel):
 class SubmitCodesPayload(BaseModel):
     note_text: str
     note_filename: Optional[str] = None
+    output_folder: Optional[str] = None
     codes: Optional[List[FinalizedCode]] = None  # Keep for backward compatibility
     icd_codes: Optional[List[FinalizedCode]] = None
     cpt_codes: Optional[List[FinalizedCode]] = None
@@ -241,10 +242,18 @@ async def submit_codes(payload: SubmitCodesPayload):
     stem = _slugify_name(note_path.stem)
     extension = note_path.suffix or ".txt"
 
-    output_dir = OUTPUT_DIR / stem
+    # Use custom folder name if provided, otherwise use filename stem
+    if payload.output_folder and payload.output_folder.strip():
+        folder_name = _slugify_name(payload.output_folder.strip())
+        if not folder_name:
+            folder_name = "output"
+    else:
+        folder_name = stem
+
+    output_dir = OUTPUT_DIR / folder_name
     counter = 1
     while output_dir.exists():
-        output_dir = OUTPUT_DIR / f"{stem}-{counter:02d}"
+        output_dir = OUTPUT_DIR / f"{folder_name}-{counter:02d}"
         counter += 1
     output_dir.mkdir(parents=True, exist_ok=True)
 
