@@ -1,3 +1,15 @@
+// Common OpenAI models that work with the responses API
+const LLM_MODELS = [
+    "gpt-5",
+    "gpt-4o",
+    "gpt-4-turbo",
+    "gpt-4",
+    "gpt-4o-mini",
+    "o1-preview",
+    "o1-mini",
+    "gpt-3.5-turbo",
+];
+
 const state = {
     originalNoteText: "",
     noteText: "",
@@ -9,14 +21,44 @@ const state = {
     noteFileName: null,
     selectedIcdCodeIds: new Set(),
     selectedCptCodeIds: new Set(),
+    expandedCodeIds: new Set(), // Track expanded codes
     activeTab: "icd", // "icd" or "cpt"
+    pageMode: "predict", // "predict" or "review"
     mode: "local",
-    llmModel: "",
+    llmModel: "gpt-5",
     reasoning: "",
     icdVersion: "9", // "9" or "10" - default to ICD-9
+    reviewFolders: [], // List of available output folders
+    selectedReviewFolder: null, // Currently selected folder name
+    loadedReviewData: null, // { note, codes, folderName }
+    originalReviewCodes: null, // Snapshot of codes when folder was loaded (for change tracking) - null means not loaded yet
+    originalAdmissionId: null, // Original admission ID when folder was loaded
+    folderSearchTerm: "", // Search term for filtering folders by admission ID
+    codeSearch: {
+        icd: {
+            term: "",
+            results: [],
+            activeIndex: -1,
+            loading: false,
+            seq: 0,
+        },
+        cpt: {
+            term: "",
+            results: [],
+            activeIndex: -1,
+            loading: false,
+            seq: 0,
+        },
+    },
 };
 
 const highlightClasses = ["highlight-1", "highlight-2", "highlight-3", "highlight-4"];
+
+const CODE_SEARCH_DEBOUNCE_MS = 250;
+const codeSearchTimers = {
+    icd: { debounce: null, blur: null },
+    cpt: { debounce: null, blur: null },
+};
 
 const elements = {
     noteInput: document.getElementById("noteInput"),
@@ -29,6 +71,7 @@ const elements = {
     browseBtn: document.getElementById("browseBtn"),
     submitBtn: document.getElementById("submitBtn"),
     submitCodesBtn: document.getElementById("submitCodesBtn"),
+    saveChangesBtn: document.getElementById("saveChangesBtn"),
     resetBtn: document.getElementById("resetBtn"),
     clearHighlightsBtn: document.getElementById("clearHighlightsBtn"),
     clearFinalizedBtn: document.getElementById("clearFinalizedBtn"),
@@ -40,22 +83,51 @@ const elements = {
     finalizedContainer: document.getElementById("finalizedContainer"),
     statusBar: document.getElementById("statusBar"),
     searchInput: document.getElementById("codeSearch"),
+    codeSearchResults: document.getElementById("codeSearchResults"),
+    codeSearchAddBtn: document.getElementById("codeSearchAddBtn"),
     cptSearchInput: document.getElementById("cptCodeSearch"),
+    cptSearchResults: document.getElementById("cptSearchResults"),
+    cptSearchAddBtn: document.getElementById("cptSearchAddBtn"),
     noteFilename: document.getElementById("noteFilename"),
     modeSelect: document.getElementById("modeSelect"),
+    folderNameModal: document.getElementById("folderNameModal"),
+    folderNameInput: document.getElementById("folderNameInput"),
+    folderNameSubmitBtn: document.getElementById("folderNameSubmitBtn"),
+    folderNameCancelBtn: document.getElementById("folderNameCancelBtn"),
     modeSelectWrapper: document.getElementById("modeSelectWrapper"),
     llmModelWrapper: document.getElementById("llmModelWrapper"),
-    llmModelInput: document.getElementById("llmModelInput"),
+    llmModelSelect: document.getElementById("llmModelSelect"),
     modelSelectWrapper: document.getElementById("modelSelectWrapper"),
     methodSelectWrapper: document.getElementById("methodSelectWrapper"),
     thresholdWrapper: document.getElementById("thresholdWrapper"),
     icdVersionToggle: document.getElementById("icdVersionToggle"),
     icdVersionWrapper: document.getElementById("icdVersionWrapper"),
+    lookupIcdVersionToggle: document.getElementById("lookupIcdVersionToggle"),
+    lookupIcdVersionWrapper: document.getElementById("lookupIcdVersionWrapper"),
     codeTabs: document.getElementById("codeTabs"),
     icdTab: document.getElementById("icdTab"),
     cptTab: document.getElementById("cptTab"),
     icdTabContent: document.getElementById("icdTabContent"),
     cptTabContent: document.getElementById("cptTabContent"),
+    pageModeSelect: document.getElementById("pageModeSelect"),
+    pageModeWrapper: document.getElementById("pageModeWrapper"),
+    appMain: document.querySelector(".app-main"),
+    sidebar: document.querySelector(".sidebar"),
+    suggestionsSection: document.querySelector(".sidebar-section.suggestions"),
+    finalizedSection: document.querySelector(".sidebar-section.finalized"),
+    sidebarHeader: document.querySelector(".sidebar-header"),
+    sidebarTitle: document.querySelector(".sidebar-header h2"),
+    sidebarHint: document.querySelector(".sidebar-header p"),
+    folderBrowser: document.getElementById("folderBrowser"),
+    folderList: document.getElementById("folderList"),
+    refreshFoldersBtn: document.getElementById("refreshFoldersBtn"),
+    folderSearchInput: document.getElementById("folderSearchInput"),
+    admissionIdWrapper: document.getElementById("admissionIdWrapper"),
+    admissionIdInput: document.getElementById("admissionIdInput"),
+    manualLookupIcd: document.querySelector("#icdTabContent .lookup-panel"),
+    manualLookupCpt: document.querySelector("#cptTabContent .lookup-panel"),
+    aiPanelIcd: document.querySelector("#icdTabContent .ai-panel"),
+    aiPanelCpt: document.querySelector("#cptTabContent .ai-panel"),
 };
 
 const submitButtonDefaultText = elements.submitBtn ? elements.submitBtn.textContent : "Submit";
@@ -78,11 +150,18 @@ function updateModeUI() {
     if (elements.modeSelect) {
         elements.modeSelect.value = state.mode;
     }
+    
+    // Only update visibility if we're in predict mode
+    // In review mode, visibility is controlled by updatePageModeUI()
+    const isPredictMode = state.pageMode !== "review";
     const useLLM = state.mode === "llm";
-    toggleSection(elements.modelSelectWrapper, !useLLM);
-    toggleSection(elements.methodSelectWrapper, !useLLM);
-    toggleSection(elements.thresholdWrapper, !useLLM);
-    toggleSection(elements.llmModelWrapper, useLLM);
+    
+    if (isPredictMode) {
+        toggleSection(elements.modelSelectWrapper, !useLLM);
+        toggleSection(elements.methodSelectWrapper, !useLLM);
+        toggleSection(elements.thresholdWrapper, !useLLM);
+        toggleSection(elements.llmModelWrapper, useLLM);
+    }
 
     if (elements.modelSelect) {
         elements.modelSelect.disabled = useLLM;
@@ -93,9 +172,155 @@ function updateModeUI() {
     if (elements.thresholdInput) {
         elements.thresholdInput.disabled = useLLM;
     }
-    if (elements.llmModelInput) {
-        elements.llmModelInput.disabled = !useLLM;
-        elements.llmModelInput.value = state.llmModel;
+    if (elements.llmModelSelect) {
+        elements.llmModelSelect.disabled = !useLLM;
+        elements.llmModelSelect.value = state.llmModel || "gpt-5";
+    }
+}
+
+function updatePageModeUI() {
+    const isReviewMode = state.pageMode === "review";
+    const isPredictMode = !isReviewMode;
+
+    // Update sidebar title and hint based on mode and folder selection
+    if (elements.sidebarTitle && elements.sidebarHint) {
+        if (isReviewMode) {
+            if (state.selectedReviewFolder !== null) {
+                // Review mode with folder loaded
+                elements.sidebarTitle.textContent = "Review Codes";
+                elements.sidebarHint.textContent = "Review and edit codes assigned to the selected note, or manually add new codes.";
+            } else {
+                // Review mode without folder selected
+                elements.sidebarTitle.textContent = "Review Codes";
+                elements.sidebarHint.textContent = "Select an output folder to load codes and review them.";
+            }
+        } else {
+            // Predict mode
+            elements.sidebarTitle.textContent = "Assigned Codes";
+            elements.sidebarHint.textContent = "choose from AI suggested codes and/or manually add your own.";
+        }
+    }
+
+    // Hide/show predict-related header controls
+    toggleSection(elements.pageModeWrapper, true); // Always show Mode toggle (predict/review)
+    toggleSection(elements.modeSelectWrapper, isPredictMode); // Hide Engine dropdown in review mode
+    toggleSection(elements.icdVersionWrapper, isPredictMode); // Hide ICD version toggle in header when in review mode
+    // In predict mode: show local model controls only when not in LLM mode
+    const useLLM = state.mode === "llm";
+    toggleSection(elements.modelSelectWrapper, isPredictMode && !useLLM);
+    toggleSection(elements.methodSelectWrapper, isPredictMode && !useLLM);
+    toggleSection(elements.thresholdWrapper, isPredictMode && !useLLM);
+    toggleSection(elements.llmModelWrapper, isPredictMode && useLLM);
+    if (elements.submitBtn) {
+        toggleSection(elements.submitBtn, isPredictMode);
+    }
+    
+    // Show/hide ICD version toggle in lookup panel based on mode and active tab
+    if (elements.lookupIcdVersionWrapper) {
+        const showInLookup = isReviewMode && state.activeTab === "icd";
+        toggleSection(elements.lookupIcdVersionWrapper, showInLookup);
+    }
+
+    // Hide/show note input/upload area (drop zone, editor, and note display)
+    // In predict mode: 
+    //   - Always show both drop zone and editor (they coexist)
+    //   - Show note display container when codes exist (for highlights)
+    // In review mode: hide drop zone and editor, show note display only if note is loaded
+    if (isPredictMode) {
+        const hasCodes = state.icdCodes.length > 0 || state.cptCodes.length > 0;
+        
+        // Always show both drop zone and editor in predict mode
+        toggleSection(elements.dropZone, true);
+        toggleSection(elements.noteEditorContainer, true);
+        
+        // Show note display container when codes exist (for highlighting)
+        toggleSection(elements.noteDisplayContainer, hasCodes);
+    } else {
+        // Review mode: hide drop zone and editor, show note display only if note is loaded
+        toggleSection(elements.dropZone, false);
+        toggleSection(elements.noteEditorContainer, false);
+        const hasLoadedData = state.loadedReviewData && state.loadedReviewData.note_text && state.loadedReviewData.note_text.trim().length > 0;
+        toggleSection(elements.noteDisplayContainer, hasLoadedData);
+    }
+
+    // Hide/show AI suggestions section
+    // In review mode: only show suggestions section when a folder is selected (show tabs and manual lookup, hide AI panels)
+    // In predict mode: show everything
+    if (isReviewMode) {
+        // In review mode, only show suggestions section if a folder is selected
+        const showSuggestionsInReview = state.selectedReviewFolder !== null;
+        if (elements.suggestionsSection) {
+            toggleSection(elements.suggestionsSection, showSuggestionsInReview);
+        }
+        if (showSuggestionsInReview) {
+            // Show tabs and manual lookup in review mode when folder is selected
+            if (elements.codeTabs) toggleSection(elements.codeTabs, true);
+            if (elements.manualLookupIcd) toggleSection(elements.manualLookupIcd, true);
+            if (elements.manualLookupCpt) toggleSection(elements.manualLookupCpt, true);
+            // Hide AI panels in review mode
+            if (elements.aiPanelIcd) toggleSection(elements.aiPanelIcd, false);
+            if (elements.aiPanelCpt) toggleSection(elements.aiPanelCpt, false);
+        }
+    } else {
+        // In predict mode, show the suggestions section
+        // Show tabs and manual lookup always (so users can manually add codes)
+        // Only show AI panels when codes have been predicted
+        const hasCodes = state.icdCodes.length > 0 || state.cptCodes.length > 0;
+        if (elements.suggestionsSection) {
+            toggleSection(elements.suggestionsSection, true);
+        }
+        if (elements.codeTabs) toggleSection(elements.codeTabs, true);
+        if (elements.manualLookupIcd) toggleSection(elements.manualLookupIcd, true);
+        if (elements.manualLookupCpt) toggleSection(elements.manualLookupCpt, true);
+        // Only show AI panels when codes have been predicted
+        if (elements.aiPanelIcd) toggleSection(elements.aiPanelIcd, hasCodes);
+        if (elements.aiPanelCpt) toggleSection(elements.aiPanelCpt, hasCodes);
+    }
+
+    // Show/hide folder browser in review mode
+    toggleSection(elements.folderBrowser, isReviewMode);
+    
+    // Show/hide admission ID input in review mode (when folder is loaded)
+    const showAdmissionId = isReviewMode && state.selectedReviewFolder !== null;
+    toggleSection(elements.admissionIdWrapper, showAdmissionId);
+
+    // Show/hide submit codes vs save changes buttons based on mode
+    if (elements.submitCodesBtn) {
+        toggleSection(elements.submitCodesBtn, isPredictMode);
+    }
+    if (elements.saveChangesBtn) {
+        toggleSection(elements.saveChangesBtn, isReviewMode);
+    }
+    
+    // Hide reset button in review mode
+    if (elements.resetBtn) {
+        toggleSection(elements.resetBtn, isPredictMode);
+    }
+    
+    // Hide/show entire code sidebar
+    // In predict mode: hide entire sidebar if note textbox is empty, show otherwise
+    // In review mode: always show sidebar (visibility controlled by folder selection elsewhere)
+    if (elements.sidebar) {
+        let sidebarVisible = true;
+        if (isPredictMode) {
+            const hasNoteText = state.noteText && state.noteText.trim().length > 0;
+            sidebarVisible = hasNoteText;
+            toggleSection(elements.sidebar, sidebarVisible);
+        } else {
+            // In review mode, show sidebar (folder selection controls other visibility)
+            toggleSection(elements.sidebar, true);
+            sidebarVisible = true;
+        }
+        
+        // Add/remove class on app-main to make main content full-width when sidebar is hidden
+        if (elements.appMain) {
+            elements.appMain.classList.toggle("sidebar-hidden", !sidebarVisible);
+        }
+    } else {
+        // If sidebar element doesn't exist, assume it's hidden
+        if (elements.appMain) {
+            elements.appMain.classList.add("sidebar-hidden");
+        }
     }
 }
 
@@ -139,6 +364,20 @@ function normalizeNote(text) {
     return (text || "").replace(/\r\n?/g, "\n");
 }
 
+function inferIcdVersionFromModel(modelPath) {
+    const normalized = (modelPath || "").toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+    if (normalized.includes("icd-10") || normalized.includes("icd10")) {
+        return "10";
+    }
+    if (normalized.includes("icd-9") || normalized.includes("icd9")) {
+        return "9";
+    }
+    return null;
+}
+
 function displayNoteFilename() {
     if (!elements.noteFilename) {
         return;
@@ -156,15 +395,89 @@ function isProcessingActive() {
     return elements.processingOverlay && !elements.processingOverlay.classList.contains("hidden");
 }
 
-function updateSubmitCodesState() {
-    if (!elements.submitCodesBtn) {
-        return;
+function hasReviewChanges() {
+    // Check if we're in review mode and have loaded data
+    if (state.pageMode !== "review" || !state.selectedReviewFolder || state.originalReviewCodes === null) {
+        return false;
     }
+    
+    // Check if admission ID changed
+    const currentAdmissionId = elements.admissionIdInput ? elements.admissionIdInput.value.trim() : null;
+    if (currentAdmissionId !== state.originalAdmissionId) {
+        return true;
+    }
+    
+    // Check if codes changed (compare arrays)
+    const currentCodes = state.finalizedCodes || [];
+    const originalCodes = state.originalReviewCodes || [];
+    
+    if (currentCodes.length !== originalCodes.length) {
+        return true;
+    }
+    
+    // Create a normalized comparison function
+    const normalizeCode = (code) => ({
+        code: (code.code || "").trim(),
+        type: (code.type || "icd").toLowerCase(),
+        description: (code.description || "").trim(),
+        explanation: (code.explanation || "").trim(),
+        probability: code.probability,
+        icdVersion: code.icdVersion || null,
+        // Compare spans count only (not exact content for now)
+        spansCount: Array.isArray(code.spans) ? code.spans.length : 0,
+    });
+    
+    const currentNormalized = currentCodes.map(normalizeCode).sort((a, b) => {
+        if (a.type !== b.type) return a.type.localeCompare(b.type);
+        return a.code.localeCompare(b.code);
+    });
+    
+    const originalNormalized = originalCodes.map(normalizeCode).sort((a, b) => {
+        if (a.type !== b.type) return a.type.localeCompare(b.type);
+        return a.code.localeCompare(b.code);
+    });
+    
+    // Compare normalized codes
+    for (let i = 0; i < currentNormalized.length; i++) {
+        const current = currentNormalized[i];
+        const original = originalNormalized[i];
+        if (
+            current.code !== original.code ||
+            current.type !== original.type ||
+            current.description !== original.description ||
+            current.explanation !== original.explanation ||
+            current.probability !== original.probability ||
+            current.icdVersion !== original.icdVersion ||
+            current.spansCount !== original.spansCount
+        ) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+function updateSubmitCodesState() {
     const processing = isProcessingActive();
-    const enabled = state.finalizedCodes.length > 0 && !processing;
-    elements.submitCodesBtn.disabled = !enabled;
-    if (!processing) {
-        elements.submitCodesBtn.textContent = submitCodesButtonDefaultText;
+    
+    if (state.pageMode === "review") {
+        // In review mode: use saveChangesBtn
+        if (elements.saveChangesBtn) {
+            const enabled = hasReviewChanges() && !processing;
+            elements.saveChangesBtn.disabled = !enabled;
+            if (!processing) {
+                elements.saveChangesBtn.textContent = "Save Changes";
+            }
+        }
+    } else {
+        // In predict mode: use submitCodesBtn
+        if (elements.submitCodesBtn) {
+            const enabled = state.finalizedCodes.length > 0 && !processing;
+            elements.submitCodesBtn.disabled = !enabled;
+            if (!processing) {
+                elements.submitCodesBtn.textContent = submitCodesButtonDefaultText;
+            }
+        }
     }
 }
 
@@ -177,8 +490,16 @@ function clearFinalizedCodes() {
     }
 }
 
-function removeFinalizedCode(code) {
-    state.finalizedCodes = state.finalizedCodes.filter((entry) => entry.code !== code);
+function removeFinalizedCode(code, codeType) {
+    state.finalizedCodes = state.finalizedCodes.filter((entry) => {
+        if (entry.code !== code) {
+            return true;
+        }
+        if (!codeType) {
+            return false;
+        }
+        return entry.type !== codeType;
+    });
     renderFinalizedCodes();
     if (state.icdCodes.length || state.cptCodes.length) {
         renderCodes("icd");
@@ -186,7 +507,7 @@ function removeFinalizedCode(code) {
     }
 }
 
-function renderFinalizedCodes() {
+function renderFinalizedCodes(focusIndex = null) {
     if (!elements.finalizedContainer) {
         return;
     }
@@ -202,9 +523,13 @@ function renderFinalizedCodes() {
     }
 
     elements.finalizedContainer.innerHTML = "";
-    state.finalizedCodes.forEach((entry) => {
+    state.finalizedCodes.forEach((entry, index) => {
         const card = document.createElement("div");
         card.className = "final-code-card";
+        if (entry.editing) {
+            card.classList.add("editing");
+        }
+        card.tabIndex = 0;
 
         const info = document.createElement("div");
         info.className = "final-code-info";
@@ -213,13 +538,78 @@ function renderFinalizedCodes() {
         codeEl.className = "code";
         const codeType = entry.type || "icd";
         codeEl.innerHTML = `<span class="code-type">${codeType.toUpperCase()}</span> ${entry.code}`;
+        card.setAttribute("role", "group");
+        card.setAttribute(
+            "aria-label",
+            `${codeType.toUpperCase()} code ${entry.code} finalized entry`
+        );
+        card.setAttribute("aria-expanded", entry.editing ? "true" : "false");
 
-        const descEl = document.createElement("div");
-        descEl.className = "description";
-        descEl.textContent = entry.description || "";
+        const activateEditor = () => {
+            if (state.finalizedCodes[index]?.editing) {
+                return;
+            }
+            state.finalizedCodes = state.finalizedCodes.map((item, idx) => ({
+                ...item,
+                editing: idx === index,
+            }));
+            renderFinalizedCodes(index);
+        };
 
         info.appendChild(codeEl);
-        info.appendChild(descEl);
+
+        if (entry.editing) {
+            const descInput = document.createElement("textarea");
+            descInput.className = "final-code-description";
+            descInput.rows = Math.max(2, (entry.description || "").split("\n").length);
+            descInput.value = entry.description || "";
+            descInput.placeholder = "Add or edit description";
+            descInput.setAttribute(
+                "aria-label",
+                `${codeType.toUpperCase()} ${entry.code} description editor`
+            );
+            descInput.addEventListener("input", (event) => {
+                state.finalizedCodes[index].description = event.target.value;
+                updateSubmitCodesState(); // Update button state in real-time
+            });
+            descInput.addEventListener("keydown", (event) => {
+                if (event.key === "Escape") {
+                    event.preventDefault();
+                    state.finalizedCodes[index].editing = false;
+                    renderFinalizedCodes();
+                } else if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    descInput.blur();
+                }
+            });
+            descInput.addEventListener("blur", (event) => {
+                const trimmed = event.target.value.trim();
+                state.finalizedCodes[index].description = trimmed;
+                state.finalizedCodes[index].editing = false;
+                renderFinalizedCodes();
+                updateSubmitCodesState(); // Ensure button state is updated after blur
+            });
+
+            if (focusIndex === index) {
+                requestAnimationFrame(() => {
+                    descInput.focus();
+                    const length = descInput.value.length;
+                    descInput.setSelectionRange(length, length);
+                });
+            }
+
+            info.appendChild(descInput);
+        } else {
+            const descEl = document.createElement("div");
+            descEl.className = "description";
+            const hasDescription =
+                typeof entry.description === "string" && entry.description.trim().length > 0;
+            descEl.textContent = hasDescription ? entry.description : "Click to add description";
+            if (!hasDescription) {
+                descEl.classList.add("placeholder");
+            }
+            info.appendChild(descEl);
+        }
 
         if (typeof entry.probability === "number" && !Number.isNaN(entry.probability)) {
             const probabilityEl = document.createElement("div");
@@ -233,7 +623,54 @@ function renderFinalizedCodes() {
         removeBtn.className = "final-code-remove";
         removeBtn.title = "Remove code";
         removeBtn.textContent = "×";
-        removeBtn.addEventListener("click", () => removeFinalizedCode(entry.code));
+        removeBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            removeFinalizedCode(entry.code, codeType);
+        });
+
+        card.addEventListener("click", (event) => {
+            if (event.target.closest(".final-code-remove")) {
+                return;
+            }
+            if (event.target.matches("textarea.final-code-description")) {
+                return;
+            }
+            // In review mode, clicking should highlight spans; otherwise activate editor
+            if (state.pageMode === "review" && entry.spans && entry.spans.length > 0) {
+                // Toggle highlighting for this code
+                const isSelected = card.classList.contains("highlighted");
+                if (isSelected) {
+                    card.classList.remove("highlighted");
+                    // Clear highlights if no other codes are selected
+                    const anyHighlighted = Array.from(elements.finalizedContainer.querySelectorAll(".final-code-card.highlighted")).length > 1;
+                    if (!anyHighlighted) {
+                        renderNote();
+                    } else {
+                        updateFinalizedHighlights();
+                    }
+                } else {
+                    card.classList.add("highlighted");
+                    updateFinalizedHighlights();
+                }
+            } else {
+                activateEditor();
+            }
+        });
+
+        card.addEventListener("keydown", (event) => {
+            if (event.target.matches("textarea.final-code-description")) {
+                return;
+            }
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                if (state.pageMode === "review" && entry.spans && entry.spans.length > 0) {
+                    // In review mode, toggle highlighting
+                    card.click();
+                } else {
+                    activateEditor();
+                }
+            }
+        });
 
         card.appendChild(info);
         card.appendChild(removeBtn);
@@ -257,8 +694,12 @@ function addFinalizedCode(entry) {
     state.finalizedCodes.push({
         code: entry.code,
         description: entry.description ?? "",
+        explanation: entry.explanation ?? "",
         probability: entry.probability ?? null,
         type: codeType,
+        spans: Array.isArray(entry.spans) ? entry.spans : [],
+        icdVersion: entry.icdVersion ?? null,
+        editing: false,
     });
     renderFinalizedCodes();
 }
@@ -275,7 +716,7 @@ function decodeTokenFragment(token) {
             .replace(/\u00C2\u0120/g, " ")
     );
 }
-const QUOTE_TRIM_REGEX = /^[\"'“”‘’«»‹›„‟]+|[\"'“”‘’«»‹›„‟]+$/g;
+const QUOTE_TRIM_REGEX = /^["'\u201C\u201D\u2018\u2019\u00AB\u00BB\u2039\u203A\u201E\u201F]+|["'\u201C\u201D\u2018\u2019\u00AB\u00BB\u2039\u203A\u201E\u201F]+$/g;
 const TRAILING_PUNCT_REGEX = /[.,;:!?]+$/;
 
 function generateSpanCandidates(text) {
@@ -524,14 +965,53 @@ function updateActiveHighlight() {
     });
 }
 
+function updateFinalizedHighlights() {
+    if (!elements.finalizedContainer) {
+        return;
+    }
+    
+    const highlightedCards = elements.finalizedContainer.querySelectorAll(".final-code-card.highlighted");
+    if (highlightedCards.length === 0) {
+        renderNote();
+        return;
+    }
+    
+    // Get all spans from highlighted finalized codes
+    const allSpans = [];
+    let highlightIndex = 0;
+    highlightedCards.forEach((card) => {
+        // Find the corresponding entry in state
+        const codeText = card.querySelector(".code").textContent.trim();
+        const entry = state.finalizedCodes.find((e) => {
+            const codeType = (e.type || "icd").toUpperCase();
+            return `${codeType} ${e.code}` === codeText;
+        });
+        
+        if (entry && entry.spans && entry.spans.length > 0) {
+            const highlightClass = highlightClasses[highlightIndex % highlightClasses.length];
+            allSpans.push(...entry.spans.map(span => ({
+                ...span,
+                highlightClass: highlightClass
+            })));
+            highlightIndex++;
+        }
+    });
+    
+    renderNote(allSpans);
+}
+
 function toggleCodeSelection(codeId, codeType = "icd") {
     const selectedSet = codeType === "icd" ? state.selectedIcdCodeIds : state.selectedCptCodeIds;
     if (selectedSet.has(codeId)) {
         selectedSet.delete(codeId);
+        state.expandedCodeIds.delete(codeId);
     } else {
         selectedSet.add(codeId);
+        state.expandedCodeIds.add(codeId); // Expand when selected
     }
     updateActiveHighlight();
+    // Re-render codes to show/hide explanation
+    renderCodes(codeType);
 }
 
 function updateNote(text) {
@@ -539,19 +1019,15 @@ function updateNote(text) {
     state.noteText = normalizeNote(state.originalNoteText);
     elements.noteInput.value = state.originalNoteText;
 
-    const hasText = state.noteText.trim().length > 0;
-    toggleSection(elements.noteEditorContainer, hasText);
-    
-    // Only show note display container if there are codes to highlight
-    const hasCodes = state.icdCodes.length > 0 || state.cptCodes.length > 0;
-    toggleSection(elements.noteDisplayContainer, hasText && hasCodes);
-
+    // Clear codes if they exist (note changed)
     if (state.icdCodes.length > 0 || state.cptCodes.length > 0) {
         clearCodes();
     }
 
     renderNote();
     displayNoteFilename();
+    // Update UI based on page mode (handles drop zone, editor, and note display visibility)
+    updatePageModeUI();
 }
 
 function readFile(file) {
@@ -680,33 +1156,26 @@ function formatProbability(value) {
 function clearCodes() {
     state.selectedIcdCodeIds.clear();
     state.selectedCptCodeIds.clear();
+    state.expandedCodeIds.clear();
     state.icdCodes = [];
     state.cptCodes = [];
-    elements.codesContainer.innerHTML = `<p class="empty-state">No ICD predictions yet. Upload a note and submit to see results.</p>`;
-    elements.cptCodesContainer.innerHTML = `<p class="empty-state">No CPT predictions yet. Upload a note and submit to see results.</p>`;
+    elements.codesContainer.innerHTML = `<p class="empty-state">No ICD codes predicted</p>`;
+    elements.cptCodesContainer.innerHTML = `<p class="empty-state">No CPT codes predicted</p>`;
     updateSubmitCodesState();
     renderNote();
+    // Update UI to show/hide note display container based on whether codes exist
+    updatePageModeUI();
 }
 
 function renderCodes(codeType = "icd") {
     const codes = codeType === "icd" ? state.icdCodes : state.cptCodes;
     const container = codeType === "icd" ? elements.codesContainer : elements.cptCodesContainer;
-    const searchInput = codeType === "icd" ? elements.searchInput : elements.cptSearchInput;
     const selectedSet = codeType === "icd" ? state.selectedIcdCodeIds : state.selectedCptCodeIds;
-    
-    const searchTerm = searchInput.value.trim().toLowerCase();
-    const filtered = codes.filter((entry) => {
-        if (!searchTerm) {
-            return true;
-        }
-        const haystack = `${entry.code} ${entry.description}`.toLowerCase();
-        return haystack.includes(searchTerm);
-    });
+
+    const filtered = codes.slice();
 
     if (!filtered.length) {
-        const emptyMessage = searchTerm 
-            ? "No codes match that search." 
-            : `No ${codeType.toUpperCase()} predictions yet. Upload a note and submit to see results.`;
+        const emptyMessage = `No ${codeType.toUpperCase()} codes predicted`;
         container.innerHTML = `<p class="empty-state">${emptyMessage}</p>`;
         selectedSet.clear();
         updateActiveHighlight();
@@ -781,7 +1250,7 @@ function renderCodes(codeType = "icd") {
         } else if (entry.spans && entry.spans.length) {
             const fallback = document.createElement("span");
             fallback.className = "token-badge";
-            fallback.textContent = "Evidence spans available (click to highlight).";
+            fallback.textContent = "Explanation available, click to reveal";
             tokensWrapper.appendChild(fallback);
         } else {
             const fallback = document.createElement("span");
@@ -793,6 +1262,23 @@ function renderCodes(codeType = "icd") {
         card.appendChild(header);
         card.appendChild(desc);
         card.appendChild(tokensWrapper);
+
+        // Add explanation section (shown when expanded)
+        const isExpanded = state.expandedCodeIds.has(entry.id);
+        const explanationText = typeof entry.explanation === "string" ? entry.explanation.trim() : "";
+        if (isExpanded && explanationText) {
+            const explanationWrapper = document.createElement("div");
+            explanationWrapper.className = "code-explanation";
+            const explanationLabel = document.createElement("div");
+            explanationLabel.className = "explanation-label";
+            explanationLabel.textContent = "Explanation:";
+            const explanationTextEl = document.createElement("div");
+            explanationTextEl.className = "explanation-text";
+            explanationTextEl.textContent = explanationText;
+            explanationWrapper.appendChild(explanationLabel);
+            explanationWrapper.appendChild(explanationTextEl);
+            card.appendChild(explanationWrapper);
+        }
 
         card.addEventListener("click", () => {
             toggleCodeSelection(entry.id, codeType);
@@ -811,6 +1297,342 @@ function renderCodes(codeType = "icd") {
     updateSubmitCodesState();
 }
 
+function getCodeSearchElements(type) {
+    return type === "cpt"
+        ? {
+              input: elements.cptSearchInput,
+              results: elements.cptSearchResults,
+              addBtn: elements.cptSearchAddBtn,
+          }
+        : {
+              input: elements.searchInput,
+              results: elements.codeSearchResults,
+              addBtn: elements.codeSearchAddBtn,
+          };
+}
+
+function getCodeSearchState(type) {
+    return state.codeSearch[type];
+}
+
+function getCodeSearchTimers(type) {
+    return codeSearchTimers[type];
+}
+
+function getCodeSystemForSearch(type) {
+    if (type === "cpt") {
+        return "cpt";
+    }
+    return state.icdVersion === "10" ? "icd10" : "icd9";
+}
+
+function isSearchTabActive(type) {
+    return type === "cpt" ? state.activeTab === "cpt" : state.activeTab === "icd";
+}
+
+function updateCodeSearchAddState(type) {
+    const { addBtn } = getCodeSearchElements(type);
+    if (!addBtn) {
+        return;
+    }
+    const stateSlice = getCodeSearchState(type);
+    addBtn.disabled = !stateSlice.term.trim().length;
+}
+
+function renderCodeSearchResults(type) {
+    const { results: container } = getCodeSearchElements(type);
+    if (!container) {
+        return;
+    }
+
+    const stateSlice = getCodeSearchState(type);
+    const isActive = isSearchTabActive(type);
+
+    if (!isActive || !stateSlice.term.trim()) {
+        container.classList.add("hidden");
+        container.innerHTML = "";
+        return;
+    }
+
+    if (stateSlice.loading) {
+        container.innerHTML = `<div class="code-search-empty">Searching...</div>`;
+        container.classList.remove("hidden");
+        return;
+    }
+
+    const results = stateSlice.results;
+    if (!results.length) {
+        container.innerHTML = `<div class="code-search-empty">No matching codes found.</div>`;
+        container.classList.remove("hidden");
+        return;
+    }
+
+    container.innerHTML = "";
+    results.forEach((result, index) => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "code-search-option";
+        option.setAttribute("role", "option");
+        option.dataset.index = String(index);
+        if (index === stateSlice.activeIndex) {
+            option.classList.add("active");
+            option.setAttribute("aria-selected", "true");
+        } else {
+            option.setAttribute("aria-selected", "false");
+        }
+        const codeEl = document.createElement("span");
+        codeEl.className = "code";
+        codeEl.textContent = result.code;
+        const descEl = document.createElement("span");
+        descEl.className = "description";
+        descEl.textContent = result.description;
+        option.appendChild(codeEl);
+        option.appendChild(descEl);
+        option.addEventListener("mousedown", (event) => event.preventDefault());
+        option.addEventListener("click", () => addCodeFromSearchResult(type, result));
+        container.appendChild(option);
+    });
+
+    container.classList.remove("hidden");
+}
+
+function scheduleCodeSearch(type) {
+    const timers = getCodeSearchTimers(type);
+    if (timers.debounce) {
+        clearTimeout(timers.debounce);
+    }
+
+    const stateSlice = getCodeSearchState(type);
+    if (!stateSlice.term.trim()) {
+        stateSlice.results = [];
+        stateSlice.activeIndex = -1;
+        stateSlice.loading = false;
+        renderCodeSearchResults(type);
+        return;
+    }
+
+    stateSlice.loading = true;
+    renderCodeSearchResults(type);
+    timers.debounce = setTimeout(() => performCodeSearch(type), CODE_SEARCH_DEBOUNCE_MS);
+}
+
+async function performCodeSearch(type) {
+    const stateSlice = getCodeSearchState(type);
+    const timers = getCodeSearchTimers(type);
+
+    if (!stateSlice.term.trim() || !isSearchTabActive(type)) {
+        stateSlice.loading = false;
+        renderCodeSearchResults(type);
+        return;
+    }
+
+    const system = getCodeSystemForSearch(type);
+    const seq = ++stateSlice.seq;
+
+    try {
+        const response = await fetch(
+            `/code-search?system=${encodeURIComponent(system)}&q=${encodeURIComponent(stateSlice.term)}&limit=20`
+        );
+        if (!response.ok) {
+            throw new Error(`Search failed with status ${response.status}`);
+        }
+        const data = await response.json();
+        if (seq !== stateSlice.seq) {
+            return;
+        }
+        if (!isSearchTabActive(type)) {
+            stateSlice.loading = false;
+            return;
+        }
+        stateSlice.results = Array.isArray(data.results) ? data.results : [];
+        stateSlice.activeIndex = stateSlice.results.length ? 0 : -1;
+        stateSlice.loading = false;
+        renderCodeSearchResults(type);
+    } catch (error) {
+        if (seq !== stateSlice.seq) {
+            return;
+        }
+        console.warn("Code search failed:", error);
+        stateSlice.results = [];
+        stateSlice.activeIndex = -1;
+        stateSlice.loading = false;
+        if (isSearchTabActive(type)) {
+            renderCodeSearchResults(type);
+            setStatus("Failed to search code descriptions.", "error");
+        }
+    } finally {
+        timers.debounce = null;
+    }
+}
+
+function handleCodeSearchInput(type, event) {
+    const stateSlice = getCodeSearchState(type);
+    stateSlice.term = event.target.value || "";
+    updateCodeSearchAddState(type);
+    if (!isSearchTabActive(type)) {
+        return;
+    }
+    scheduleCodeSearch(type);
+}
+
+function handleCodeSearchFocus(type) {
+    const timers = getCodeSearchTimers(type);
+    if (timers.blur) {
+        clearTimeout(timers.blur);
+        timers.blur = null;
+    }
+    const stateSlice = getCodeSearchState(type);
+    if (stateSlice.term.trim()) {
+        renderCodeSearchResults(type);
+    }
+}
+
+function handleCodeSearchBlur(type) {
+    const timers = getCodeSearchTimers(type);
+    if (timers.blur) {
+        clearTimeout(timers.blur);
+    }
+    timers.blur = setTimeout(() => {
+        const { results: container } = getCodeSearchElements(type);
+        if (container) {
+            container.classList.add("hidden");
+        }
+    }, 150);
+}
+
+function moveCodeSearchSelection(type, offset) {
+    const stateSlice = getCodeSearchState(type);
+    const results = stateSlice.results;
+    if (!results.length) {
+        return;
+    }
+    let nextIndex = stateSlice.activeIndex + offset;
+    if (nextIndex < 0) {
+        nextIndex = results.length - 1;
+    } else if (nextIndex >= results.length) {
+        nextIndex = 0;
+    }
+    stateSlice.activeIndex = nextIndex;
+    renderCodeSearchResults(type);
+}
+
+function handleCodeSearchKeyDown(type, event) {
+    if ((type === "icd" && state.activeTab !== "icd") || (type === "cpt" && state.activeTab !== "cpt")) {
+        return;
+    }
+
+    const stateSlice = getCodeSearchState(type);
+
+    switch (event.key) {
+        case "ArrowDown":
+            if (stateSlice.results.length) {
+                event.preventDefault();
+                moveCodeSearchSelection(type, 1);
+            }
+            break;
+        case "ArrowUp":
+            if (stateSlice.results.length) {
+                event.preventDefault();
+                moveCodeSearchSelection(type, -1);
+            }
+            break;
+        case "Enter":
+            event.preventDefault();
+            if (stateSlice.results.length && stateSlice.activeIndex >= 0) {
+                const selected = stateSlice.results[stateSlice.activeIndex];
+                addCodeFromSearchResult(type, selected);
+            } else if (stateSlice.term.trim()) {
+                addManualCodeFromSearch(type, stateSlice.term.trim());
+            }
+            break;
+        case "Escape":
+            resetCodeSearch(type);
+            break;
+        default:
+            break;
+    }
+}
+
+function addCodeFromSearchResult(type, result) {
+    if (!result || !result.code) {
+        return;
+    }
+    const codeType = type === "cpt" ? "cpt" : "icd";
+    const priorLength = state.finalizedCodes.length;
+    addFinalizedCode({
+        code: result.code,
+        description: result.description ?? "",
+        probability: null,
+        type: codeType,
+        spans: [],
+        icdVersion: codeType === "icd" ? state.icdVersion : null,
+    });
+    if (state.finalizedCodes.length > priorLength) {
+        if (codeType === "icd") {
+            setStatus(`Added ICD-${state.icdVersion} code ${result.code} from dictionary.`, "success");
+        } else {
+            setStatus(`Added CPT code ${result.code} from dictionary.`, "success");
+        }
+        resetCodeSearch(type);
+    }
+}
+
+function addManualCodeFromSearch(type, rawCode) {
+    const code = rawCode.trim();
+    if (!code.length) {
+        return;
+    }
+    const normalized = code.toUpperCase();
+    const codeType = type === "cpt" ? "cpt" : "icd";
+    const priorLength = state.finalizedCodes.length;
+    addFinalizedCode({
+        code: normalized,
+        description: "",
+        probability: null,
+        type: codeType,
+        spans: [],
+        icdVersion: codeType === "icd" ? state.icdVersion : null,
+    });
+    if (state.finalizedCodes.length > priorLength) {
+        if (codeType === "icd") {
+            setStatus(`Added ICD-${state.icdVersion} code ${normalized}.`, "success");
+        } else {
+            setStatus(`Added CPT code ${normalized}.`, "success");
+        }
+        resetCodeSearch(type);
+    }
+}
+
+function resetCodeSearch(type, keepValue = false) {
+    const stateSlice = getCodeSearchState(type);
+    const timers = getCodeSearchTimers(type);
+    const { input, results } = getCodeSearchElements(type);
+
+    stateSlice.loading = false;
+    stateSlice.results = [];
+    stateSlice.activeIndex = -1;
+    if (!keepValue) {
+        stateSlice.term = "";
+        if (input) {
+            input.value = "";
+        }
+    }
+    updateCodeSearchAddState(type);
+
+    if (timers.debounce) {
+        clearTimeout(timers.debounce);
+        timers.debounce = null;
+    }
+    if (timers.blur) {
+        clearTimeout(timers.blur);
+        timers.blur = null;
+    }
+    if (results) {
+        results.classList.add("hidden");
+        results.innerHTML = "";
+    }
+}
+
 async function submitPrediction() {
     const rawNote = elements.noteInput.value;
     const normalizedNote = normalizeNote(rawNote);
@@ -826,10 +1648,11 @@ async function submitPrediction() {
         note: state.noteText,
     };
     let endpoint = "/predict-explain";
+    let selectedModel = "";
 
     if (useLLM) {
         endpoint = "/predict-explain-llm";
-        const llmModelName = elements.llmModelInput ? elements.llmModelInput.value.trim() : "";
+        const llmModelName = elements.llmModelSelect ? elements.llmModelSelect.value.trim() : "gpt-5";
         state.llmModel = llmModelName;
         if (llmModelName) {
             payload.model = llmModelName;
@@ -849,6 +1672,7 @@ async function submitPrediction() {
         payload.explain_method = method;
         payload.confidence_threshold = threshold;
         elements.thresholdInput.value = threshold.toString();
+        selectedModel = model;
     }
 
     try {
@@ -878,6 +1702,7 @@ async function submitPrediction() {
 
         const icdCodes = Array.isArray(data.icd_codes) ? data.icd_codes : [];
         const cptCodes = Array.isArray(data.cpt_codes) ? data.cpt_codes : [];
+        const inferredIcdVersion = useLLM ? state.icdVersion : inferIcdVersionFromModel(selectedModel);
         
         if (!icdCodes.length && !cptCodes.length) {
             setStatus(
@@ -887,7 +1712,7 @@ async function submitPrediction() {
                 "success"
             );
             clearCodes();
-            toggleSection(elements.noteEditorContainer, true);
+            updatePageModeUI();
             return;
         }
 
@@ -927,10 +1752,24 @@ async function submitPrediction() {
                 }
             }
 
+            // Extract explanation as string: if it's a string, use it; if it's an object, check for text field or use empty string
+            let explanationText = "";
+            if (typeof entry.explanation === "string") {
+                explanationText = entry.explanation.trim();
+            } else if (entry.explanation && typeof entry.explanation === "object") {
+                // For local models, explanation might be an object with spans/tokens
+                // Check if there's a text field in the explanation object or in the entry itself
+                explanationText = entry.explanation.text || entry.explanation_text || "";
+                if (typeof explanationText !== "string") {
+                    explanationText = "";
+                }
+            }
+
             return {
                 id: `icd-${entry.code}-${index}`,
                 code: entry.code,
                 description: entry.description ?? "",
+                explanation: explanationText,
                 probability:
                     typeof probabilityValue === "number" && !Number.isNaN(probabilityValue)
                         ? probabilityValue
@@ -939,6 +1778,7 @@ async function submitPrediction() {
                 tokens,
                 spans,
                 source: useLLM ? "llm" : "local",
+                icdVersion: inferredIcdVersion || null,
             };
         });
 
@@ -978,10 +1818,24 @@ async function submitPrediction() {
                 }
             }
 
+            // Extract explanation as string: if it's a string, use it; if it's an object, check for text field or use empty string
+            let explanationText = "";
+            if (typeof entry.explanation === "string") {
+                explanationText = entry.explanation.trim();
+            } else if (entry.explanation && typeof entry.explanation === "object") {
+                // For local models, explanation might be an object with spans/tokens
+                // Check if there's a text field in the explanation object or in the entry itself
+                explanationText = entry.explanation.text || entry.explanation_text || "";
+                if (typeof explanationText !== "string") {
+                    explanationText = "";
+                }
+            }
+
             return {
                 id: `cpt-${entry.code}-${index}`,
                 code: entry.code,
                 description: entry.description ?? "",
+                explanation: explanationText,
                 probability:
                     typeof probabilityValue === "number" && !Number.isNaN(probabilityValue)
                         ? probabilityValue
@@ -990,14 +1844,15 @@ async function submitPrediction() {
                 tokens,
                 spans,
                 source: useLLM ? "llm" : "local",
+                icdVersion: null,
             };
         });
 
         renderCodes("icd");
         renderCodes("cpt");
-        toggleSection(elements.noteEditorContainer, false);
-        toggleSection(elements.noteDisplayContainer, true);
         renderNote();
+        // Update UI based on page mode (will handle drop zone/editor/display visibility)
+        updatePageModeUI();
 
         const originLabel = useLLM ? "LLM" : "local model";
         const totalCodes = state.icdCodes.length + state.cptCodes.length;
@@ -1015,14 +1870,37 @@ async function submitPrediction() {
     } catch (error) {
         setStatus(`Prediction failed: ${error.message}`, "error");
         clearCodes();
-        toggleSection(elements.noteEditorContainer, true);
+        updatePageModeUI();
     } finally {
         setProcessing(false, "predict");
         updateSubmitCodesState();
     }
 }
 
-async function submitFinalizedCodes() {
+function showFolderNameModal() {
+    if (!elements.folderNameModal || !elements.folderNameInput) {
+        return;
+    }
+    elements.folderNameInput.value = "";
+    elements.folderNameModal.classList.remove("hidden");
+    elements.folderNameModal.setAttribute("aria-hidden", "false");
+    elements.folderNameInput.focus();
+}
+
+function hideFolderNameModal() {
+    if (!elements.folderNameModal) {
+        return;
+    }
+    elements.folderNameModal.classList.add("hidden");
+    elements.folderNameModal.setAttribute("aria-hidden", "true");
+}
+
+function sanitizeFolderName(name) {
+    // Only allow alphanumeric, dots, dashes, and underscores
+    return name.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^[._-]+|[._-]+$/g, "") || "output";
+}
+
+async function submitFinalizedCodes(folderName = null, updateExisting = false, oldFolderName = null) {
     if (!state.finalizedCodes.length) {
         setStatus("Add at least one code before submitting.", "error");
         return;
@@ -1039,24 +1917,72 @@ async function submitFinalizedCodes() {
             : `manual-note-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
     state.noteFileName = effectiveFileName;
 
-    // Separate ICD and CPT codes
-    const icdCodes = state.finalizedCodes.filter(entry => entry.type === "icd");
-    const cptCodes = state.finalizedCodes.filter(entry => entry.type === "cpt");
+    const codesPayload = state.finalizedCodes.map((entry) => {
+        const codeType = (entry.type || "icd").toLowerCase();
+        const spans = Array.isArray(entry.spans)
+            ? entry.spans
+                  .map((span) => {
+                      if (!span || typeof span !== "object") {
+                          return null;
+                      }
+                      const sanitized = {};
+                      const start = Number(span.start);
+                      if (Number.isFinite(start)) {
+                          sanitized.start = Math.trunc(start);
+                      }
+                      const end = Number(span.end);
+                      if (Number.isFinite(end)) {
+                          sanitized.end = Math.trunc(end);
+                      }
+                      if (typeof span.text === "string") {
+                          sanitized.text = span.text;
+                      }
+                      return Object.keys(sanitized).length ? sanitized : null;
+                  })
+                  .filter(Boolean)
+            : [];
+
+        // Ensure explanation is always a string (defense in depth)
+        let explanationText = "";
+        if (typeof entry.explanation === "string") {
+            explanationText = entry.explanation.trim();
+        } else if (entry.explanation && typeof entry.explanation === "object") {
+            // If somehow an explanation object got stored, try to extract text or use empty string
+            explanationText = entry.explanation.text || entry.explanation_text || "";
+            if (typeof explanationText !== "string") {
+                explanationText = "";
+            }
+        }
+
+        return {
+            code: entry.code,
+            code_type: codeType,
+            description: entry.description ?? "",
+            explanation: explanationText,
+            probability: entry.probability,
+            icd_version: codeType === "icd" ? (entry.icdVersion || null) : null,
+            evidence_spans: spans,
+        };
+    });
+
+    const icdCount = codesPayload.filter((entry) => entry.code_type === "icd").length;
+    const cptCount = codesPayload.filter((entry) => entry.code_type === "cpt").length;
 
     const payload = {
         note_text: state.noteText,
         note_filename: effectiveFileName,
-        icd_codes: icdCodes.map((entry) => ({
-            code: entry.code,
-            description: entry.description ?? "",
-            probability: entry.probability,
-        })),
-        cpt_codes: cptCodes.map((entry) => ({
-            code: entry.code,
-            description: entry.description ?? "",
-            probability: entry.probability,
-        })),
+        codes: codesPayload,
+        update_existing: updateExisting,
     };
+    
+    if (folderName && folderName.trim().length) {
+        payload.output_folder = sanitizeFolderName(folderName.trim());
+    }
+    
+    // If oldFolderName is provided and different from new folder name, include it for renaming
+    if (oldFolderName && oldFolderName.trim().length && oldFolderName !== folderName) {
+        payload.old_folder_name = sanitizeFolderName(oldFolderName.trim());
+    }
 
     try {
         setStatus("Saving finalized codes...", "loading");
@@ -1074,18 +2000,64 @@ async function submitFinalizedCodes() {
         }
 
         const data = await response.json();
-        const outputPath = data.output_path || "output";
-        const icdCount = icdCodes.length;
-        const cptCount = cptCodes.length;
-        let message = `Codes submitted successfully. Saved to ${outputPath}.`;
-        if (icdCount > 0 && cptCount > 0) {
-            message += ` Created separate files: ${icdCount} ICD code${icdCount === 1 ? '' : 's'} and ${cptCount} CPT code${cptCount === 1 ? '' : 's'}.`;
-        } else if (icdCount > 0) {
-            message += ` Created ICD codes file with ${icdCount} code${icdCount === 1 ? '' : 's'}.`;
-        } else if (cptCount > 0) {
-            message += ` Created CPT codes file with ${cptCount} code${cptCount === 1 ? '' : 's'}.`;
+        const outputPathRaw = typeof data.output_path === "string" ? data.output_path : "output";
+        const counts = data && typeof data === "object" ? data.counts : null;
+        const icdSummaryCount =
+            counts && typeof counts.icd === "number" ? counts.icd : icdCount;
+        const cptSummaryCount =
+            counts && typeof counts.cpt === "number" ? counts.cpt : cptCount;
+        const icd9SummaryCount =
+            counts && typeof counts.icd9 === "number" ? counts.icd9 : null;
+        const icd10SummaryCount =
+            counts && typeof counts.icd10 === "number" ? counts.icd10 : null;
+        const icdUnknownSummaryCount =
+            counts && typeof counts.icd_unknown === "number" ? counts.icd_unknown : null;
+        const normalizedOutput = outputPathRaw.replace(/\\/g, "/").replace(/\/+$/, "");
+        const codesFileName =
+            data.codes_file ||
+            (Array.isArray(data.created_files)
+                ? data.created_files.find(
+                      (name) => typeof name === "string" && name.toLowerCase().endsWith(".json")
+                  )
+                : null) ||
+            "finalized_codes.json";
+        const outputFilePath = normalizedOutput ? `${normalizedOutput}/${codesFileName}` : codesFileName;
+
+        let message = `Codes submitted successfully. Saved to ${outputFilePath}.`;
+        const summaryParts = [];
+        if (icd9SummaryCount > 0) {
+            summaryParts.push(`${icd9SummaryCount} ICD-9 code${icd9SummaryCount === 1 ? "" : "s"}`);
+        }
+        if (icd10SummaryCount > 0) {
+            summaryParts.push(`${icd10SummaryCount} ICD-10 code${icd10SummaryCount === 1 ? "" : "s"}`);
+        }
+        if (!icd9SummaryCount && !icd10SummaryCount && icdSummaryCount > 0) {
+            summaryParts.push(`${icdSummaryCount} ICD code${icdSummaryCount === 1 ? "" : "s"}`);
+        }
+        if (icdUnknownSummaryCount > 0) {
+            summaryParts.push(`${icdUnknownSummaryCount} ICD (unspecified) code${icdUnknownSummaryCount === 1 ? "" : "s"}`);
+        }
+        if (cptSummaryCount > 0) {
+            summaryParts.push(`${cptSummaryCount} CPT code${cptSummaryCount === 1 ? "" : "s"}`);
+        }
+        if (summaryParts.length) {
+            message += ` Export covers ${summaryParts.join(" and ")}.`;
         }
         setStatus(message, "success");
+        
+        // If we're in review mode and saved successfully, update the original state
+        if (state.pageMode === "review") {
+            state.originalReviewCodes = JSON.parse(JSON.stringify(state.finalizedCodes));
+            const newAdmissionId = elements.admissionIdInput ? elements.admissionIdInput.value.trim() : state.selectedReviewFolder;
+            if (newAdmissionId) {
+                state.originalAdmissionId = newAdmissionId;
+                // Always update selectedReviewFolder to match the new admission ID (folder may have been renamed)
+                state.selectedReviewFolder = newAdmissionId;
+                // Reload the folder list to reflect any changes (including renaming)
+                loadReviewFolders();
+            }
+            updateSubmitCodesState();
+        }
     } catch (error) {
         setStatus(`Failed to submit codes: ${error.message}`, "error");
     } finally {
@@ -1108,14 +2080,23 @@ function switchTab(tabType) {
         elements.icdTabContent.classList.toggle("active", tabType === "icd");
         elements.cptTabContent.classList.toggle("active", tabType === "cpt");
     }
+    
+    // Update visibility of ICD version toggle in lookup panel
+    if (elements.lookupIcdVersionWrapper) {
+        const showInLookup = state.pageMode === "review" && tabType === "icd";
+        toggleSection(elements.lookupIcdVersionWrapper, showInLookup);
+    }
+
+    renderCodeSearchResults("icd");
+    renderCodeSearchResults("cpt");
+    updateCodeSearchAddState("icd");
+    updateCodeSearchAddState("cpt");
 }
 
 function resetAll() {
     elements.noteInput.value = "";
-    elements.searchInput.value = "";
-    if (elements.cptSearchInput) {
-        elements.cptSearchInput.value = "";
-    }
+    resetCodeSearch("icd");
+    resetCodeSearch("cpt");
     state.originalNoteText = "";
     state.noteText = "";
     state.noteFileName = null;
@@ -1123,36 +2104,164 @@ function resetAll() {
     state.cptCodes = [];
     state.selectedIcdCodeIds.clear();
     state.selectedCptCodeIds.clear();
+    state.expandedCodeIds.clear();
     state.activeTab = "icd";
     renderNote();
     clearCodes();
     clearFinalizedCodes();
     switchTab("icd");
-    toggleSection(elements.noteEditorContainer, false);
-    toggleSection(elements.noteDisplayContainer, false);
     setProcessing(false, "predict");
+    // Update UI based on page mode (will handle drop zone/editor visibility)
+    updatePageModeUI();
     setStatus("Cleared inputs.", "success");
 }
 
-function initEvents() {
+function syncIcdVersionToggles() {
+    // Sync both toggles to match the current state
+    const isIcd10 = state.icdVersion === "10";
     if (elements.icdVersionToggle) {
-        elements.icdVersionToggle.addEventListener("change", (event) => {
-            // When checked (thumb on right) = ICD-10, when unchecked (thumb on left) = ICD-9
-            const newVersion = event.target.checked ? "10" : "9";
-            if (state.icdVersion !== newVersion) {
-                state.icdVersion = newVersion;
-                filterAndPopulateModels();
-                clearCodes();
-                clearFinalizedCodes();
-                renderNote();
+        elements.icdVersionToggle.checked = isIcd10;
+    }
+    if (elements.lookupIcdVersionToggle) {
+        elements.lookupIcdVersionToggle.checked = isIcd10;
+    }
+}
+
+function handleIcdVersionChange(newVersion, sourceToggle) {
+    if (state.icdVersion === newVersion) {
+        return;
+    }
+    
+    state.icdVersion = newVersion;
+    
+    // Sync both toggles (avoid recursive triggering)
+    if (sourceToggle !== elements.icdVersionToggle && elements.icdVersionToggle) {
+        elements.icdVersionToggle.checked = newVersion === "10";
+    }
+    if (sourceToggle !== elements.lookupIcdVersionToggle && elements.lookupIcdVersionToggle) {
+        elements.lookupIcdVersionToggle.checked = newVersion === "10";
+    }
+    
+    resetCodeSearch("icd");
+    
+    // In review mode, only update the search dictionary and note rendering
+    // Don't clear finalized codes (they're loaded from the folder)
+    if (state.pageMode === "review") {
+        renderNote(); // Re-render note to update highlights if any
+        setStatus(
+            `Switched to ICD-${newVersion}. Manual lookup now searches ICD-${newVersion} dictionary.`,
+            "info"
+        );
+    } else {
+        // In predict mode, clear codes and finalized codes as before
+        filterAndPopulateModels();
+        clearCodes();
+        clearFinalizedCodes();
+        renderNote();
+        setStatus(
+            `Switched to ICD-${newVersion}. Model list updated.`,
+            "info"
+        );
+    }
+}
+
+function initEvents() {
+    if (elements.pageModeSelect) {
+        elements.pageModeSelect.addEventListener("change", (event) => {
+            const newPageMode = event.target.value === "review" ? "review" : "predict";
+            if (state.pageMode !== newPageMode) {
+                state.pageMode = newPageMode;
+                updatePageModeUI();
+                // Clear state when switching modes
+                if (newPageMode === "predict") {
+                    // Switching to predict mode - clear review data if any
+                    clearCodes();
+                    clearFinalizedCodes();
+                    state.noteText = "";
+                    state.originalNoteText = "";
+                    state.noteFileName = null;
+                    if (elements.noteInput) {
+                        elements.noteInput.value = "";
+                    }
+                    renderNote();
+                    updatePageModeUI(); // Update UI after clearing note state
+                } else {
+                    // Switching to review mode - clear predict data
+                    clearCodes();
+                    clearFinalizedCodes();
+                    state.noteText = "";
+                    state.originalNoteText = "";
+                    state.noteFileName = null;
+                    state.selectedReviewFolder = null;
+                    state.loadedReviewData = null;
+                    state.originalReviewCodes = null;
+                    state.originalAdmissionId = null;
+                    if (elements.admissionIdInput) {
+                        elements.admissionIdInput.value = "";
+                    }
+                    renderNote();
+                    // Clear folder search when switching to review mode
+                    state.folderSearchTerm = "";
+                    if (elements.folderSearchInput) {
+                        elements.folderSearchInput.value = "";
+                    }
+                    // Load folders when switching to review mode
+                    loadReviewFolders();
+                    updateSubmitCodesState(); // Update button state
+                }
                 setStatus(
-                    `Switched to ICD-${newVersion}. Model list updated.`,
+                    newPageMode === "review"
+                        ? "Switched to Review mode. Select an output folder to load."
+                        : "Switched to Predict mode.",
                     "info"
                 );
             }
         });
+        // Initialize page mode
+        elements.pageModeSelect.value = state.pageMode;
+    }
+
+    if (elements.refreshFoldersBtn) {
+        elements.refreshFoldersBtn.addEventListener("click", () => {
+            loadReviewFolders();
+        });
+    }
+
+    // Folder search input
+    if (elements.folderSearchInput) {
+        elements.folderSearchInput.addEventListener("input", (event) => {
+            state.folderSearchTerm = event.target.value || "";
+            renderFolderList();
+        });
+        // Clear search when switching modes or when folders are reloaded
+        elements.folderSearchInput.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                state.folderSearchTerm = "";
+                elements.folderSearchInput.value = "";
+                renderFolderList();
+            }
+        });
+    }
+
+    if (elements.icdVersionToggle) {
+        elements.icdVersionToggle.addEventListener("change", (event) => {
+            // When checked (thumb on right) = ICD-10, when unchecked (thumb on left) = ICD-9
+            const newVersion = event.target.checked ? "10" : "9";
+            handleIcdVersionChange(newVersion, event.target);
+        });
         // Initialize toggle state: ICD-9 = unchecked (thumb on left), ICD-10 = checked (thumb on right)
         elements.icdVersionToggle.checked = state.icdVersion === "10";
+    }
+    
+    if (elements.lookupIcdVersionToggle) {
+        elements.lookupIcdVersionToggle.addEventListener("change", (event) => {
+            // When checked (thumb on right) = ICD-10, when unchecked (thumb on left) = ICD-9
+            const newVersion = event.target.checked ? "10" : "9";
+            handleIcdVersionChange(newVersion, event.target);
+        });
+        // Initialize toggle state: ICD-9 = unchecked (thumb on left), ICD-10 = checked (thumb on right)
+        elements.lookupIcdVersionToggle.checked = state.icdVersion === "10";
     }
 
     if (elements.modeSelect) {
@@ -1174,8 +2283,12 @@ function initEvents() {
         });
     }
 
-    if (elements.llmModelInput) {
-        elements.llmModelInput.addEventListener("input", (event) => {
+    if (elements.llmModelSelect) {
+        // Populate LLM model dropdown
+        populateSelect(elements.llmModelSelect, LLM_MODELS);
+        elements.llmModelSelect.value = state.llmModel || "gpt-5";
+        
+        elements.llmModelSelect.addEventListener("change", (event) => {
             state.llmModel = event.target.value;
         });
     }
@@ -1205,12 +2318,90 @@ function initEvents() {
         elements.clearFinalizedBtn.addEventListener("click", clearFinalizedCodes);
     }
     if (elements.submitCodesBtn) {
-        elements.submitCodesBtn.addEventListener("click", submitFinalizedCodes);
+        elements.submitCodesBtn.addEventListener("click", () => {
+            // In predict mode: show modal to get folder name
+            if (!state.finalizedCodes.length) {
+                setStatus("Add at least one code before submitting.", "error");
+                return;
+            }
+            showFolderNameModal();
+        });
+    }
+    
+    if (elements.saveChangesBtn) {
+        elements.saveChangesBtn.addEventListener("click", () => {
+            // In review mode: always update existing folder (with renaming if admission ID changed)
+            if (!hasReviewChanges()) {
+                setStatus("No changes to save.", "info");
+                return;
+            }
+            const folderName = elements.admissionIdInput ? elements.admissionIdInput.value.trim() : state.selectedReviewFolder;
+            if (!folderName) {
+                setStatus("Admission ID is required.", "error");
+                return;
+            }
+            const oldFolderName = state.selectedReviewFolder;
+            // Always update existing folder, but pass old folder name for renaming if needed
+            submitFinalizedCodes(folderName, true, oldFolderName); // updateExisting = true, pass oldFolderName for renaming
+        });
+    }
+    
+    // Add event listener for admission ID input changes
+    if (elements.admissionIdInput) {
+        elements.admissionIdInput.addEventListener("input", () => {
+            updateSubmitCodesState();
+        });
+    }
+    
+    if (elements.folderNameCancelBtn) {
+        elements.folderNameCancelBtn.addEventListener("click", hideFolderNameModal);
+    }
+    
+    if (elements.folderNameSubmitBtn) {
+        elements.folderNameSubmitBtn.addEventListener("click", () => {
+            const folderName = elements.folderNameInput ? elements.folderNameInput.value.trim() : "";
+            hideFolderNameModal();
+            submitFinalizedCodes(folderName);
+        });
+    }
+    
+    if (elements.folderNameInput) {
+        elements.folderNameInput.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                const folderName = elements.folderNameInput.value.trim();
+                hideFolderNameModal();
+                submitFinalizedCodes(folderName);
+            } else if (event.key === "Escape") {
+                event.preventDefault();
+                hideFolderNameModal();
+            }
+        });
+    }
+    
+    // Close modal when clicking outside
+    if (elements.folderNameModal) {
+        elements.folderNameModal.addEventListener("click", (event) => {
+            if (event.target === elements.folderNameModal) {
+                hideFolderNameModal();
+            }
+        });
     }
     elements.clearHighlightsBtn.addEventListener("click", () => {
         state.selectedIcdCodeIds.clear();
         state.selectedCptCodeIds.clear();
+        state.expandedCodeIds.clear();
         updateActiveHighlight();
+        renderCodes("icd");
+        renderCodes("cpt");
+        
+        // Also clear finalized code highlights in review mode
+        if (state.pageMode === "review" && elements.finalizedContainer) {
+            elements.finalizedContainer.querySelectorAll(".final-code-card.highlighted").forEach((card) => {
+                card.classList.remove("highlighted");
+            });
+            updateFinalizedHighlights();
+        }
     });
 
     // Tab switching functionality
@@ -1222,18 +2413,319 @@ function initEvents() {
     }
 
     // Search event listeners
-    elements.searchInput.addEventListener("input", () => renderCodes("icd"));
+    if (elements.searchInput) {
+        elements.searchInput.addEventListener("input", (event) => handleCodeSearchInput("icd", event));
+        elements.searchInput.addEventListener("keydown", (event) => handleCodeSearchKeyDown("icd", event));
+        elements.searchInput.addEventListener("focus", () => handleCodeSearchFocus("icd"));
+        elements.searchInput.addEventListener("blur", () => handleCodeSearchBlur("icd"));
+    }
+    if (elements.codeSearchAddBtn) {
+        elements.codeSearchAddBtn.addEventListener("click", () => {
+            const { term } = getCodeSearchState("icd");
+            if (term.trim()) {
+                addManualCodeFromSearch("icd", term.trim());
+            }
+        });
+    }
     if (elements.cptSearchInput) {
-        elements.cptSearchInput.addEventListener("input", () => renderCodes("cpt"));
+        elements.cptSearchInput.addEventListener("input", (event) => handleCodeSearchInput("cpt", event));
+        elements.cptSearchInput.addEventListener("keydown", (event) => handleCodeSearchKeyDown("cpt", event));
+        elements.cptSearchInput.addEventListener("focus", () => handleCodeSearchFocus("cpt"));
+        elements.cptSearchInput.addEventListener("blur", () => handleCodeSearchBlur("cpt"));
+    }
+    if (elements.cptSearchAddBtn) {
+        elements.cptSearchAddBtn.addEventListener("click", () => {
+            const { term } = getCodeSearchState("cpt");
+            if (term.trim()) {
+                addManualCodeFromSearch("cpt", term.trim());
+            }
+        });
     }
     
     updateSubmitCodesState();
     updateModeUI();
+    updateCodeSearchAddState("icd");
+    updateCodeSearchAddState("cpt");
+}
+
+async function loadReviewFolders() {
+    try {
+        setStatus("Loading folders...", "loading");
+        const response = await fetch("/output-folders");
+        if (!response.ok) {
+            throw new Error(`Failed to load folders: ${response.status}`);
+        }
+        const data = await response.json();
+        state.reviewFolders = Array.isArray(data.folders) ? data.folders : [];
+        // Note: We keep the search term when reloading (user might have a search active)
+        renderFolderList();
+        setStatus(`Loaded ${state.reviewFolders.length} folder${state.reviewFolders.length === 1 ? "" : "s"}.`, "success");
+    } catch (error) {
+        console.error("Failed to load folders:", error);
+        state.reviewFolders = [];
+        renderFolderList();
+        setStatus(`Failed to load folders: ${error.message}`, "error");
+    }
+}
+
+function renderFolderList() {
+    if (!elements.folderList) {
+        return;
+    }
+    
+    // Filter folders based on search term (case-insensitive match against folder name/admission ID)
+    const searchTerm = (state.folderSearchTerm || "").trim().toLowerCase();
+    let filteredFolders = state.reviewFolders.filter((folder) => {
+        if (!searchTerm) {
+            return true;
+        }
+        const folderName = (folder.name || "").toLowerCase();
+        return folderName.includes(searchTerm);
+    });
+    
+    // Sort folders by date (most recent first)
+    filteredFolders = filteredFolders.sort((a, b) => {
+        const dateA = a.generated_at ? new Date(a.generated_at).getTime() : 0;
+        const dateB = b.generated_at ? new Date(b.generated_at).getTime() : 0;
+        return dateB - dateA; // Descending order (most recent first)
+    });
+    
+    if (filteredFolders.length === 0) {
+        if (searchTerm) {
+            elements.folderList.innerHTML = `<p class="empty-state">No folders found matching "${state.folderSearchTerm}".</p>`;
+        } else {
+            elements.folderList.innerHTML = `<p class="empty-state">No output folders found.</p>`;
+        }
+        return;
+    }
+    
+    elements.folderList.innerHTML = "";
+    filteredFolders.forEach((folder) => {
+        const folderCard = document.createElement("div");
+        folderCard.className = "folder-card";
+        if (state.selectedReviewFolder === folder.name) {
+            folderCard.classList.add("selected");
+        }
+        
+        const header = document.createElement("div");
+        header.className = "folder-card-header";
+        
+        const nameEl = document.createElement("div");
+        nameEl.className = "folder-name";
+        nameEl.textContent = folder.name;
+        header.appendChild(nameEl);
+        
+        if (folder.generated_at) {
+            const dateEl = document.createElement("div");
+            dateEl.className = "folder-date";
+            try {
+                const date = new Date(folder.generated_at);
+                dateEl.textContent = date.toLocaleString();
+            } catch {
+                dateEl.textContent = folder.generated_at;
+            }
+            header.appendChild(dateEl);
+        }
+        
+        // Add delete button
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "folder-delete-btn";
+        deleteBtn.innerHTML = "×";
+        deleteBtn.setAttribute("aria-label", `Delete folder ${folder.name}`);
+        deleteBtn.type = "button";
+        deleteBtn.addEventListener("click", (event) => {
+            event.stopPropagation(); // Prevent folder selection when clicking delete
+            deleteReviewFolder(folder.name);
+        });
+        header.appendChild(deleteBtn);
+        
+        folderCard.appendChild(header);
+        
+        if (folder.code_counts && (folder.code_counts.total > 0 || folder.code_counts.icd > 0 || folder.code_counts.cpt > 0)) {
+            const countsEl = document.createElement("div");
+            countsEl.className = "folder-counts";
+            const counts = [];
+            if (folder.code_counts.icd > 0) {
+                counts.push(`${folder.code_counts.icd} ICD`);
+            }
+            if (folder.code_counts.cpt > 0) {
+                counts.push(`${folder.code_counts.cpt} CPT`);
+            }
+            if (counts.length > 0) {
+                countsEl.textContent = counts.join(", ");
+            } else if (folder.code_counts.total > 0) {
+                countsEl.textContent = `${folder.code_counts.total} code${folder.code_counts.total === 1 ? "" : "s"}`;
+            }
+            folderCard.appendChild(countsEl);
+        }
+        
+        if (folder.note_file) {
+            const noteEl = document.createElement("div");
+            noteEl.className = "folder-note-file";
+            noteEl.textContent = folder.note_file;
+            folderCard.appendChild(noteEl);
+        }
+        
+        folderCard.addEventListener("click", () => {
+            selectReviewFolder(folder.name);
+        });
+        
+        elements.folderList.appendChild(folderCard);
+    });
+}
+
+async function deleteReviewFolder(folderName) {
+    if (!folderName) {
+        return;
+    }
+    
+    // Confirm deletion
+    if (!confirm(`Are you sure you want to delete folder "${folderName}"? This action cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        setStatus(`Deleting folder ${folderName}...`, "loading");
+        setProcessing(true, "predict");
+        
+        const response = await fetch(`/output-folder/${encodeURIComponent(folderName)}`, {
+            method: "DELETE",
+        });
+        
+        if (!response.ok) {
+            const message = await response.text();
+            throw new Error(message || `Failed to delete folder: ${response.status}`);
+        }
+        
+        // If the deleted folder was selected, clear the selection
+        if (state.selectedReviewFolder === folderName) {
+            state.selectedReviewFolder = null;
+            state.loadedReviewData = null;
+            state.noteText = "";
+            state.originalNoteText = "";
+            state.noteFileName = null;
+            state.finalizedCodes = [];
+            state.originalReviewCodes = null;
+            state.originalAdmissionId = null;
+            if (elements.admissionIdInput) {
+                elements.admissionIdInput.value = "";
+            }
+            renderNote();
+            renderFinalizedCodes();
+            updatePageModeUI();
+        }
+        
+        // Reload folder list
+        await loadReviewFolders();
+        setStatus(`Folder "${folderName}" deleted successfully.`, "success");
+    } catch (error) {
+        setStatus(`Failed to delete folder: ${error.message}`, "error");
+    } finally {
+        setProcessing(false, "predict");
+    }
+}
+
+async function selectReviewFolder(folderName) {
+    if (!folderName) {
+        return;
+    }
+    
+    try {
+        setStatus(`Loading folder ${folderName}...`, "loading");
+        setProcessing(true, "predict");
+        
+        const response = await fetch(`/output-folder/${encodeURIComponent(folderName)}`);
+        if (!response.ok) {
+            throw new Error(`Failed to load folder: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        state.selectedReviewFolder = folderName;
+        state.loadedReviewData = data;
+        
+        // Load note
+        state.noteText = normalizeNote(data.note_text || "");
+        state.originalNoteText = state.noteText;
+        state.noteFileName = data.note_file || "";
+        
+        // Store original folder name (admission ID) for change tracking
+        state.originalAdmissionId = folderName;
+        if (elements.admissionIdInput) {
+            elements.admissionIdInput.value = folderName;
+        }
+        
+        // Convert codes to finalized codes format
+        const codesList = Array.isArray(data.codes) ? data.codes : [];
+        state.finalizedCodes = codesList.map((codeEntry) => {
+            const codeType = (codeEntry.code_type || "icd").toLowerCase();
+            const evidenceSpans = Array.isArray(codeEntry.evidence_spans) ? codeEntry.evidence_spans : [];
+            const spans = evidenceSpans.map((span) => {
+                if (typeof span === "object" && span !== null) {
+                    return {
+                        start: Number(span.start) || 0,
+                        end: Number(span.end) || 0,
+                        text: typeof span.text === "string" ? span.text : "",
+                    };
+                }
+                return null;
+            }).filter(Boolean);
+            
+            // Parse confidence from string if needed
+            let probability = null;
+            if (typeof codeEntry.confidence === "string" && codeEntry.confidence.trim()) {
+                const parsed = parseFloat(codeEntry.confidence);
+                if (!Number.isNaN(parsed)) {
+                    probability = parsed;
+                }
+            } else if (typeof codeEntry.confidence === "number") {
+                probability = codeEntry.confidence;
+            }
+            
+            return {
+                code: codeEntry.code || "",
+                description: codeEntry.description || "",
+                explanation: codeEntry.explanation || "",
+                probability: probability,
+                type: codeType,
+                spans: spans,
+                icdVersion: codeType === "icd" ? (codeEntry.icd_version || null) : null,
+                editing: false,
+            };
+        });
+        
+        // Store original codes for change tracking (deep copy)
+        state.originalReviewCodes = JSON.parse(JSON.stringify(state.finalizedCodes));
+        
+        // Clear AI suggested codes (not used in review mode)
+        state.icdCodes = [];
+        state.cptCodes = [];
+        state.selectedIcdCodeIds.clear();
+        state.selectedCptCodeIds.clear();
+        state.expandedCodeIds.clear();
+        
+        // Render everything
+        renderNote();
+        renderFinalizedCodes();
+        renderFolderList();
+        displayNoteFilename();
+        updatePageModeUI();
+        updateSubmitCodesState();
+        
+        setStatus(`Loaded folder ${folderName} with ${state.finalizedCodes.length} code${state.finalizedCodes.length === 1 ? "" : "s"}.`, "success");
+    } catch (error) {
+        console.error("Failed to load folder:", error);
+        setStatus(`Failed to load folder: ${error.message}`, "error");
+        state.selectedReviewFolder = null;
+        state.loadedReviewData = null;
+    } finally {
+        setProcessing(false, "predict");
+    }
 }
 
 function boot() {
     initEvents();
     updateModeUI();
+    updatePageModeUI();
     updateNote("");
     clearCodes();
     clearFinalizedCodes();

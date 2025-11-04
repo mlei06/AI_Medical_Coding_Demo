@@ -18,6 +18,13 @@
                 </div>
             </div>
             <div class="header-actions">
+                <label class="dropdown" id="pageModeWrapper">
+                    <span>Mode</span>
+                    <select id="pageModeSelect">
+                        <option value="predict">Predict</option>
+                        <option value="review">Review</option>
+                    </select>
+                </label>
                 <label class="dropdown" id="icdVersionWrapper">
                     <span>ICD Version</span>
                     <div class="toggle-switch">
@@ -37,7 +44,7 @@
                 </label>
                 <label class="dropdown hidden" id="llmModelWrapper">
                     <span>LLM Model</span>
-                    <input id="llmModelInput" type="text" placeholder="Leave blank for default">
+                    <select id="llmModelSelect"></select>
                 </label>
                 <label class="dropdown" id="modelSelectWrapper">
                     <span>Model</span>
@@ -61,9 +68,8 @@
                     <div class="drop-icon">?</div>
                     <p class="drop-title">Drag & Drop clinical note (.txt)</p>
                     <p class="drop-subtitle">or <button id="browseBtn" type="button" class="link-btn">browse your files</button></p>
-                    <p class="drop-hint">You can also edit the note below.</p>
                 </div>
-                <div class="note-editor-container hidden" id="noteEditorContainer">
+                <div class="note-editor-container" id="noteEditorContainer">
                     <div class="note-editor">
                         <label for="noteInput">Clinical Note</label>
                         <textarea id="noteInput" placeholder="Paste or type clinical note here..."></textarea>
@@ -79,31 +85,96 @@
                     </div>
                     <div id="noteDisplay" class="note-display" aria-live="polite"></div>
                 </div>
+                <div class="folder-browser hidden" id="folderBrowser">
+                    <div class="folder-browser-header">
+                        <h2>Select Output Folder</h2>
+                        <button id="refreshFoldersBtn" type="button" class="link-btn">Refresh</button>
+                    </div>
+                    <div class="folder-search-wrapper">
+                        <input id="folderSearchInput" type="search" placeholder="Search by admission ID..." autocomplete="off">
+                    </div>
+                    <div id="folderList" class="folder-list"></div>
+                </div>
             </section>
             <aside class="sidebar">
                 <div class="sidebar-header">
-                    <h2>Selected Codes</h2>
-                    <p>Hover a code to highlight important tokens.</p>
+                    <h2>Assigned Codes</h2>
+                    <p>choose from AI suggested codes and/or manually add your own.</p>
                 </div>
                 <div class="sidebar-section suggestions">
-                    <div class="section-header">
-                        <h3>AI Suggested Codes</h3>
-                    </div>
                     <div class="code-tabs" id="codeTabs">
                         <button id="icdTab" class="tab-button active" data-tab="icd">ICD Codes</button>
                         <button id="cptTab" class="tab-button" data-tab="cpt">CPT Codes</button>
                     </div>
                     <div id="icdTabContent" class="tab-content active">
-                        <div class="search-box">
-                            <input id="codeSearch" type="search" placeholder="Search ICD codes...">
-                        </div>
-                        <div id="codesContainer" class="codes-container"></div>
+                        <section class="lookup-panel" aria-labelledby="manualLookupTitle-icd">
+                            <div class="method-header">
+                                <span class="method-icon" aria-hidden="true">🔎</span>
+                                <div>
+                                    <h3 id="manualLookupTitle-icd">Manual Lookup</h3>
+                                    <p class="method-subtitle">Search the official ICD code set or add a custom code directly.</p>
+                                </div>
+                            </div>
+                            <div class="lookup-version-toggle-wrapper" id="lookupIcdVersionWrapper">
+                                <label class="dropdown">
+                                    <span>ICD Version</span>
+                                    <div class="toggle-switch">
+                                        <input type="checkbox" id="lookupIcdVersionToggle">
+                                        <label for="lookupIcdVersionToggle">
+                                            <span class="toggle-label-left">ICD-9</span>
+                                            <span class="toggle-label-right">ICD-10</span>
+                                        </label>
+                                    </div>
+                                </label>
+                            </div>
+                            <div class="search-box">
+                                <div class="code-search-wrapper">
+                                    <input id="codeSearch" type="search" placeholder="Look up an ICD code or description…">
+                                    <button id="codeSearchAddBtn" type="button" class="code-search-add-btn" disabled>Add</button>
+                                    <div id="codeSearchResults" class="code-search-results hidden" role="listbox" aria-label="ICD code search results"></div>
+                                </div>
+                                <p class="code-search-hint">Press Enter or Add to keep a code even if it’s not found in the catalog.</p>
+                            </div>
+                        </section>
+                        <section class="ai-panel" aria-labelledby="aiSuggestedTitle-icd">
+                            <div class="method-header">
+                                <span class="method-icon" aria-hidden="true">🤖</span>
+                                <div>
+                                    <h3 id="aiSuggestedTitle-icd">AI Suggested ICD Codes</h3>
+                                    <p class="method-subtitle">Review suggestions, explore highlights, then use the + button to send them to Finalized Codes.</p>
+                                </div>
+                            </div>
+                            <div id="codesContainer" class="codes-container"></div>
+                        </section>
                     </div>
                     <div id="cptTabContent" class="tab-content">
-                        <div class="search-box">
-                            <input id="cptCodeSearch" type="search" placeholder="Search CPT codes...">
-                        </div>
-                        <div id="cptCodesContainer" class="codes-container"></div>
+                        <section class="lookup-panel" aria-labelledby="manualLookupTitle-cpt">
+                            <div class="method-header">
+                                <span class="method-icon" aria-hidden="true">🛠️</span>
+                                <div>
+                                    <h3 id="manualLookupTitle-cpt">Manual Lookup</h3>
+                                    <p class="method-subtitle">Search CPT descriptions or enter a procedure code yourself.</p>
+                                </div>
+                            </div>
+                            <div class="search-box">
+                                <div class="code-search-wrapper">
+                                    <input id="cptCodeSearch" type="search" placeholder="Look up a CPT code or description…">
+                                    <button id="cptSearchAddBtn" type="button" class="code-search-add-btn" disabled>Add</button>
+                                    <div id="cptSearchResults" class="code-search-results hidden" role="listbox" aria-label="CPT code search results"></div>
+                                </div>
+                                <p class="code-search-hint">Not listed? Press Enter or Add to capture the code exactly as you typed it.</p>
+                            </div>
+                        </section>
+                        <section class="ai-panel" aria-labelledby="aiSuggestedTitle-cpt">
+                            <div class="method-header">
+                                <span class="method-icon" aria-hidden="true">🤖</span>
+                                <div>
+                                    <h3 id="aiSuggestedTitle-cpt">AI Suggested CPT Codes</h3>
+                                    <p class="method-subtitle">Click any suggestion to preview evidence, then tap + to move it into Finalized Codes.</p>
+                                </div>
+                            </div>
+                            <div id="cptCodesContainer" class="codes-container"></div>
+                        </section>
                     </div>
                 </div>
                 <div class="sidebar-section finalized">
@@ -111,10 +182,16 @@
                         <h3>Finalized Codes</h3>
                         <button id="clearFinalizedBtn" type="button" class="link-btn">Clear all</button>
                     </div>
+                    <p class="section-subtitle">Click to add/edit description</p>
+                    <div id="admissionIdWrapper" class="admission-id-wrapper hidden">
+                        <label for="admissionIdInput">Admission ID:</label>
+                        <input id="admissionIdInput" type="text" placeholder="e.g., patient-001" autocomplete="off">
+                    </div>
                     <div id="finalizedContainer" class="finalized-container">
                         <p class="empty-state">No codes selected yet.</p>
                     </div>
                     <button id="submitCodesBtn" type="button" class="primary-btn submit-codes-btn" disabled>Submit Codes</button>
+                    <button id="saveChangesBtn" type="button" class="primary-btn submit-codes-btn hidden" disabled>Save Changes</button>
                 </div>
                 <div class="sidebar-footer">
                     <button id="resetBtn" type="button">Reset</button>
@@ -126,6 +203,21 @@
             <div class="processing-card">
                 <div class="spinner" role="presentation"></div>
                 <p>Processing request...</p>
+            </div>
+        </div>
+        <div id="folderNameModal" class="modal-overlay hidden" aria-hidden="true">
+            <div class="modal-card">
+                <h2>Enter Admission ID</h2>
+                    <p class="modal-subtitle">Will be used as the folder name for this submission.</p>
+                    <div class="modal-input-group">
+                    <label for="folderNameInput">Admission ID:</label>
+                    <input type="text" id="folderNameInput" placeholder="e.g., patient-001, case-study-2024" autocomplete="off">
+                    <p class="modal-hint">Only letters, numbers, dots, dashes, and underscores are allowed.</p>
+                </div>
+                <div class="modal-actions">
+                    <button id="folderNameCancelBtn" type="button" class="modal-btn secondary">Cancel</button>
+                    <button id="folderNameSubmitBtn" type="button" class="modal-btn primary">Submit</button>
+                </div>
             </div>
         </div>
     </div>

@@ -34,12 +34,12 @@ logger = logging.getLogger(__name__)
 
 # Centralise supported explainability methods so the API and CLI stay in sync.
 EXPLAIN_METHODS: List[str] = [
+    "grad_attention",
     "laat",
     "attention_rollout",
     "gradient_x_input",
     "integrated_gradient",
     "deeplift",
-    "grad_attention",
     "atgrad_attention",
     "random",
     "occlusion",
