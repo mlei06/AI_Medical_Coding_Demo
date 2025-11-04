@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -124,6 +125,7 @@ class FinalizedCode(BaseModel):
     code: str
     code_type: Optional[str] = None
     description: Optional[str] = None
+    explanation: Optional[str] = None
     probability: Optional[float] = None
     icd_version: Optional[str] = None
     evidence_spans: Optional[List[Dict[str, Any]]] = None
@@ -135,6 +137,8 @@ class SubmitCodesPayload(BaseModel):
     note_text: str
     note_filename: Optional[str] = None
     output_folder: Optional[str] = None
+    old_folder_name: Optional[str] = None  # If provided and different from output_folder, rename the folder
+    update_existing: Optional[bool] = False  # If True and output_folder exists, update it instead of creating new
     codes: Optional[List[FinalizedCode]] = None  # Keep for backward compatibility
     icd_codes: Optional[List[FinalizedCode]] = None
     cpt_codes: Optional[List[FinalizedCode]] = None
@@ -250,12 +254,43 @@ async def submit_codes(payload: SubmitCodesPayload):
     else:
         folder_name = stem
 
-    output_dir = OUTPUT_DIR / folder_name
-    counter = 1
-    while output_dir.exists():
-        output_dir = OUTPUT_DIR / f"{folder_name}-{counter:02d}"
-        counter += 1
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Handle folder renaming if old_folder_name is provided
+    old_output_dir = None
+    if payload.old_folder_name and payload.old_folder_name.strip():
+        old_folder_name = _slugify_name(payload.old_folder_name.strip())
+        if old_folder_name and old_folder_name != folder_name:
+            old_output_dir = OUTPUT_DIR / old_folder_name
+            if old_output_dir.exists() and old_output_dir.is_dir():
+                # Rename the folder
+                output_dir = OUTPUT_DIR / folder_name
+                # If new name already exists, append counter
+                counter = 1
+                while output_dir.exists():
+                    output_dir = OUTPUT_DIR / f"{folder_name}-{counter:02d}"
+                    counter += 1
+                old_output_dir.rename(output_dir)
+            else:
+                old_output_dir = None
+    
+    # If we didn't rename, determine the output directory
+    if old_output_dir is None:
+        output_dir = OUTPUT_DIR / folder_name
+        
+        # If update_existing is True and folder exists, use it; otherwise create new folder
+        if payload.update_existing and output_dir.exists() and output_dir.is_dir():
+            # Update existing folder - keep existing folder name
+            pass
+        else:
+            # Create new folder - append counter if folder exists
+            counter = 1
+            while output_dir.exists():
+                output_dir = OUTPUT_DIR / f"{folder_name}-{counter:02d}"
+                counter += 1
+            output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Ensure directory exists (in case update_existing was True but folder was deleted)
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     note_filename = f"{stem}{extension}"
     note_file = output_dir / note_filename
@@ -326,6 +361,7 @@ async def submit_codes(payload: SubmitCodesPayload):
                     "code": item.code,
                     "code_type": base_type,
                     "description": item.description or "",
+                    "explanation": item.explanation or "",
                     "confidence": format_confidence(item.probability),
                     "icd_version": version,
                     "evidence_spans": sanitize_spans(item.evidence_spans),
@@ -386,3 +422,112 @@ async def submit_codes(payload: SubmitCodesPayload):
         "counts": counts,
         "created_files": created_files,
     }
+
+
+@app.get("/output-folders")
+async def list_output_folders() -> Dict[str, Any]:
+    """List all folders in the output directory."""
+    folders = []
+    if not OUTPUT_DIR.exists():
+        return {"folders": []}
+    
+    for item in OUTPUT_DIR.iterdir():
+        if item.is_dir():
+            # Check if this folder has a finalized_codes.json file
+            codes_file = item / "finalized_codes.json"
+            if codes_file.exists():
+                try:
+                    # Try to read metadata from the codes file
+                    codes_data = json.loads(codes_file.read_text(encoding="utf-8"))
+                    note_file = codes_data.get("note_file", "")
+                    generated_at = codes_data.get("generated_at", "")
+                    counts = codes_data.get("counts", {})
+                    folder_name = item.name
+                    
+                    folders.append({
+                        "name": folder_name,
+                        "note_file": note_file,
+                        "generated_at": generated_at,
+                        "code_counts": counts,
+                    })
+                except (json.JSONDecodeError, KeyError, OSError):
+                    # If we can't read the file, still include the folder but with minimal info
+                    folders.append({
+                        "name": item.name,
+                        "note_file": "",
+                        "generated_at": "",
+                        "code_counts": {},
+                    })
+    
+    # Sort by folder name (most recent first if using timestamp-based names)
+    folders.sort(key=lambda x: x["name"], reverse=True)
+    
+    return {"folders": folders}
+
+
+@app.get("/output-folder/{folder_name}")
+async def get_output_folder(folder_name: str) -> Dict[str, Any]:
+    """Get the note and codes from a specific output folder."""
+    # Sanitize folder name to prevent directory traversal
+    sanitized_name = _slugify_name(folder_name)
+    if not sanitized_name or sanitized_name != folder_name:
+        raise HTTPException(status_code=400, detail="Invalid folder name.")
+    
+    folder_path = OUTPUT_DIR / sanitized_name
+    if not folder_path.exists() or not folder_path.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found.")
+    
+    # Load finalized_codes.json
+    codes_file = folder_path / "finalized_codes.json"
+    if not codes_file.exists():
+        raise HTTPException(status_code=404, detail="finalized_codes.json not found in folder.")
+    
+    try:
+        codes_data = json.loads(codes_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read codes file: {str(e)}")
+    
+    # Find and load the note file
+    note_file_name = codes_data.get("note_file", "")
+    note_text = ""
+    
+    if note_file_name:
+        note_file_path = folder_path / note_file_name
+        if note_file_path.exists() and note_file_path.is_file():
+            try:
+                note_text = note_file_path.read_text(encoding="utf-8")
+            except OSError:
+                # If we can't read the note file, continue with empty note
+                pass
+    
+    # Extract codes from the codes_data
+    codes_list = codes_data.get("codes", [])
+    
+    return {
+        "folder_name": sanitized_name,
+        "note_text": note_text,
+        "note_file": note_file_name,
+        "codes": codes_list,
+        "generated_at": codes_data.get("generated_at", ""),
+        "counts": codes_data.get("counts", {}),
+    }
+
+
+@app.delete("/output-folder/{folder_name}")
+async def delete_output_folder(folder_name: str) -> Dict[str, Any]:
+    """Delete an output folder and all its contents."""
+    # Sanitize folder name to prevent directory traversal
+    sanitized_name = _slugify_name(folder_name)
+    if not sanitized_name or sanitized_name != folder_name:
+        raise HTTPException(status_code=400, detail="Invalid folder name.")
+    
+    folder_path = OUTPUT_DIR / sanitized_name
+    if not folder_path.exists() or not folder_path.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found.")
+    
+    try:
+        # Use shutil to recursively delete the folder
+        shutil.rmtree(folder_path)
+        return {"message": f"Folder '{sanitized_name}' deleted successfully."}
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete folder: {str(e)}")

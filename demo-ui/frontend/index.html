@@ -18,6 +18,13 @@
                 </div>
             </div>
             <div class="header-actions">
+                <label class="dropdown" id="pageModeWrapper">
+                    <span>Mode</span>
+                    <select id="pageModeSelect">
+                        <option value="predict">Predict</option>
+                        <option value="review">Review</option>
+                    </select>
+                </label>
                 <label class="dropdown" id="icdVersionWrapper">
                     <span>ICD Version</span>
                     <div class="toggle-switch">
@@ -78,6 +85,16 @@
                     </div>
                     <div id="noteDisplay" class="note-display" aria-live="polite"></div>
                 </div>
+                <div class="folder-browser hidden" id="folderBrowser">
+                    <div class="folder-browser-header">
+                        <h2>Select Output Folder</h2>
+                        <button id="refreshFoldersBtn" type="button" class="link-btn">Refresh</button>
+                    </div>
+                    <div class="folder-search-wrapper">
+                        <input id="folderSearchInput" type="search" placeholder="Search by admission ID..." autocomplete="off">
+                    </div>
+                    <div id="folderList" class="folder-list"></div>
+                </div>
             </section>
             <aside class="sidebar">
                 <div class="sidebar-header">
@@ -97,6 +114,18 @@
                                     <h3 id="manualLookupTitle-icd">Manual Lookup</h3>
                                     <p class="method-subtitle">Search the official ICD code set or add a custom code directly.</p>
                                 </div>
+                            </div>
+                            <div class="lookup-version-toggle-wrapper" id="lookupIcdVersionWrapper">
+                                <label class="dropdown">
+                                    <span>ICD Version</span>
+                                    <div class="toggle-switch">
+                                        <input type="checkbox" id="lookupIcdVersionToggle">
+                                        <label for="lookupIcdVersionToggle">
+                                            <span class="toggle-label-left">ICD-9</span>
+                                            <span class="toggle-label-right">ICD-10</span>
+                                        </label>
+                                    </div>
+                                </label>
                             </div>
                             <div class="search-box">
                                 <div class="code-search-wrapper">
@@ -153,10 +182,16 @@
                         <h3>Finalized Codes</h3>
                         <button id="clearFinalizedBtn" type="button" class="link-btn">Clear all</button>
                     </div>
+                    <p class="section-subtitle">Click to add/edit description</p>
+                    <div id="admissionIdWrapper" class="admission-id-wrapper hidden">
+                        <label for="admissionIdInput">Admission ID:</label>
+                        <input id="admissionIdInput" type="text" placeholder="e.g., patient-001" autocomplete="off">
+                    </div>
                     <div id="finalizedContainer" class="finalized-container">
                         <p class="empty-state">No codes selected yet.</p>
                     </div>
                     <button id="submitCodesBtn" type="button" class="primary-btn submit-codes-btn" disabled>Submit Codes</button>
+                    <button id="saveChangesBtn" type="button" class="primary-btn submit-codes-btn hidden" disabled>Save Changes</button>
                 </div>
                 <div class="sidebar-footer">
                     <button id="resetBtn" type="button">Reset</button>
