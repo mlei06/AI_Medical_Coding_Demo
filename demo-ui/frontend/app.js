@@ -23,11 +23,14 @@ const state = {
     selectedCptCodeIds: new Set(),
     expandedCodeIds: new Set(), // Track expanded codes
     activeTab: "icd", // "icd" or "cpt"
+    lookupCodeType: "icd", // "icd" or "cpt" for manual lookup
+    aiSuggestedCodeType: "icd", // "icd" or "cpt" for AI suggested codes view
     pageMode: "predict", // "predict" or "review"
     mode: "local",
     llmModel: "gpt-5",
     reasoning: "",
-    icdVersion: "9", // "9" or "10" - default to ICD-9
+    icdVersion: "9", // "9" or "10" - default to ICD-9 (for AI prediction)
+    lookupIcdVersion: "9", // "9" or "10" - default to ICD-9 (for manual lookup)
     reviewFolders: [], // List of available output folders
     selectedReviewFolder: null, // Currently selected folder name
     loadedReviewData: null, // { note, codes, folderName }
@@ -102,8 +105,14 @@ const elements = {
     thresholdWrapper: document.getElementById("thresholdWrapper"),
     icdVersionToggle: document.getElementById("icdVersionToggle"),
     icdVersionWrapper: document.getElementById("icdVersionWrapper"),
+    lookupCodeTypeToggle: document.getElementById("lookupCodeTypeToggle"),
+    lookupCodeTypeWrapper: document.getElementById("lookupCodeTypeWrapper"),
     lookupIcdVersionToggle: document.getElementById("lookupIcdVersionToggle"),
     lookupIcdVersionWrapper: document.getElementById("lookupIcdVersionWrapper"),
+    aiCodeTypeToggle: document.getElementById("aiCodeTypeToggle"),
+    aiCodeTypeToggleWrapper: document.getElementById("aiCodeTypeToggleWrapper"),
+    aiHeaderActions: document.getElementById("aiHeaderActions"),
+    resetAISuggestionsBtn: document.getElementById("resetAISuggestionsBtn"),
     codeTabs: document.getElementById("codeTabs"),
     icdTab: document.getElementById("icdTab"),
     cptTab: document.getElementById("cptTab"),
@@ -113,6 +122,7 @@ const elements = {
     pageModeWrapper: document.getElementById("pageModeWrapper"),
     appMain: document.querySelector(".app-main"),
     sidebar: document.querySelector(".sidebar"),
+    inferenceControls: document.getElementById("inferenceControls"),
     suggestionsSection: document.querySelector(".sidebar-section.suggestions"),
     finalizedSection: document.querySelector(".sidebar-section.finalized"),
     sidebarHeader: document.querySelector(".sidebar-header"),
@@ -203,35 +213,107 @@ function updatePageModeUI() {
 
     // Hide/show predict-related header controls
     toggleSection(elements.pageModeWrapper, true); // Always show Mode toggle (predict/review)
-    toggleSection(elements.modeSelectWrapper, isPredictMode); // Hide Engine dropdown in review mode
-    toggleSection(elements.icdVersionWrapper, isPredictMode); // Hide ICD version toggle in header when in review mode
+    
     // In predict mode: show local model controls only when not in LLM mode
+    // This is now handled inside inferenceControls, so these toggles control visibility within the container
     const useLLM = state.mode === "llm";
-    toggleSection(elements.modelSelectWrapper, isPredictMode && !useLLM);
-    toggleSection(elements.methodSelectWrapper, isPredictMode && !useLLM);
-    toggleSection(elements.thresholdWrapper, isPredictMode && !useLLM);
-    toggleSection(elements.llmModelWrapper, isPredictMode && useLLM);
-    if (elements.submitBtn) {
-        toggleSection(elements.submitBtn, isPredictMode);
+    
+    // Hide/show inference controls container
+    // In predict mode: show when no codes exist (so user can configure and predict)
+    // In review mode: always hide (inference controls not needed)
+    if (isPredictMode) {
+        const hasCodes = state.icdCodes.length > 0 || state.cptCodes.length > 0;
+        const hasIcdCodes = state.icdCodes.length > 0;
+        const hasCptCodes = state.cptCodes.length > 0;
+        
+        // Show inference controls when no codes exist, hide when codes exist
+        // Hide codes container when showing controls (they replace each other)
+        toggleSection(elements.inferenceControls, !hasCodes);
+        
+        // Show/hide the header actions wrapper (contains reset button and code type toggle)
+        if (elements.aiHeaderActions) {
+            toggleSection(elements.aiHeaderActions, hasCodes);
+        }
+        
+        // Show AI code type toggle when codes are available (show if both types exist)
+        if (elements.aiCodeTypeToggleWrapper) {
+            const showToggle = hasCodes && hasIcdCodes && hasCptCodes;
+            toggleSection(elements.aiCodeTypeToggleWrapper, showToggle);
+        }
+        
+        // Reset button is always visible when aiHeaderActions is visible (handled by wrapper)
+        
+        // Show/hide code containers based on toggle state
+        if (hasCodes) {
+            const showIcd = state.aiSuggestedCodeType === "icd";
+            const showCpt = state.aiSuggestedCodeType === "cpt";
+            
+            // Show codesContainer based on toggle state
+            if (elements.codesContainer) {
+                if (showIcd && hasIcdCodes) {
+                    toggleSection(elements.codesContainer, true);
+                    renderCodes("icd"); // Ensure ICD codes are rendered
+                } else if (showCpt && hasCptCodes) {
+                    toggleSection(elements.codesContainer, true);
+                    renderCodes("cpt"); // Render CPT codes in ICD container
+                } else {
+                    toggleSection(elements.codesContainer, false);
+                }
+            }
+        } else {
+            // No codes, hide both containers
+            if (elements.codesContainer) {
+                toggleSection(elements.codesContainer, false);
+            }
+            if (elements.cptCodesContainer) {
+                toggleSection(elements.cptCodesContainer, false);
+            }
+        }
+        
+        // Configure individual controls visibility when inference controls are shown
+        if (!hasCodes) {
+            toggleSection(elements.modeSelectWrapper, true);
+            toggleSection(elements.icdVersionWrapper, true);
+            toggleSection(elements.modelSelectWrapper, !useLLM);
+            toggleSection(elements.methodSelectWrapper, !useLLM);
+            toggleSection(elements.thresholdWrapper, !useLLM);
+            toggleSection(elements.llmModelWrapper, useLLM);
+            if (elements.submitBtn) {
+                toggleSection(elements.submitBtn, true);
+            }
+        }
+    } else {
+        toggleSection(elements.inferenceControls, false);
+        // In review mode, codes containers are shown/hidden based on loaded data
+        // Hide header actions (reset button and toggle) in review mode
+        if (elements.aiHeaderActions) {
+            toggleSection(elements.aiHeaderActions, false);
+        }
     }
     
-    // Show/hide ICD version toggle in lookup panel based on mode and active tab
+    // Show/hide code type toggle and ICD version toggle in lookup panel
+    // In both modes: show code type toggle, show ICD version toggle when ICD is selected
+    if (elements.lookupCodeTypeWrapper) {
+        toggleSection(elements.lookupCodeTypeWrapper, true); // Show in both modes
+    }
     if (elements.lookupIcdVersionWrapper) {
-        const showInLookup = isReviewMode && state.activeTab === "icd";
-        toggleSection(elements.lookupIcdVersionWrapper, showInLookup);
+        // In both modes, show ICD version toggle when ICD is selected in code type toggle
+        const showIcdVersion = state.lookupCodeType === "icd";
+        toggleSection(elements.lookupIcdVersionWrapper, showIcdVersion);
     }
 
     // Hide/show note input/upload area (drop zone, editor, and note display)
     // In predict mode: 
-    //   - Always show both drop zone and editor (they coexist)
+    //   - Show drop zone and editor when no codes exist (initial state)
+    //   - Hide drop zone and editor when codes exist (highlighted note is shown)
     //   - Show note display container when codes exist (for highlights)
     // In review mode: hide drop zone and editor, show note display only if note is loaded
     if (isPredictMode) {
         const hasCodes = state.icdCodes.length > 0 || state.cptCodes.length > 0;
         
-        // Always show both drop zone and editor in predict mode
-        toggleSection(elements.dropZone, true);
-        toggleSection(elements.noteEditorContainer, true);
+        // Hide drop zone and editor when highlighted note is available (codes exist)
+        toggleSection(elements.dropZone, !hasCodes);
+        toggleSection(elements.noteEditorContainer, !hasCodes);
         
         // Show note display container when codes exist (for highlighting)
         toggleSection(elements.noteDisplayContainer, hasCodes);
@@ -253,28 +335,34 @@ function updatePageModeUI() {
             toggleSection(elements.suggestionsSection, showSuggestionsInReview);
         }
         if (showSuggestionsInReview) {
-            // Show tabs and manual lookup in review mode when folder is selected
-            if (elements.codeTabs) toggleSection(elements.codeTabs, true);
+            // Tabs removed - visibility controlled by toggles
+            if (elements.codeTabs) toggleSection(elements.codeTabs, false);
+            // Only show ICD tab content (has toggles for ICD/CPT switching)
+            if (elements.icdTabContent) toggleSection(elements.icdTabContent, true);
+            if (elements.cptTabContent) toggleSection(elements.cptTabContent, false);
             if (elements.manualLookupIcd) toggleSection(elements.manualLookupIcd, true);
-            if (elements.manualLookupCpt) toggleSection(elements.manualLookupCpt, true);
+            // CPT tab content hidden - handled by toggles in ICD content
             // Hide AI panels in review mode
             if (elements.aiPanelIcd) toggleSection(elements.aiPanelIcd, false);
-            if (elements.aiPanelCpt) toggleSection(elements.aiPanelCpt, false);
+            // CPT AI panel hidden - handled by toggle in ICD panel
         }
     } else {
         // In predict mode, show the suggestions section
-        // Show tabs and manual lookup always (so users can manually add codes)
-        // Only show AI panels when codes have been predicted
-        const hasCodes = state.icdCodes.length > 0 || state.cptCodes.length > 0;
+        // Show manual lookup, and AI panels always (so users can configure and see results)
+        // Inside AI panels, inference controls and codes containers are toggled separately
+        // Tabs removed - visibility controlled by toggles
         if (elements.suggestionsSection) {
             toggleSection(elements.suggestionsSection, true);
         }
-        if (elements.codeTabs) toggleSection(elements.codeTabs, true);
+        if (elements.codeTabs) toggleSection(elements.codeTabs, false);
+        // Only show ICD tab content (has toggles for ICD/CPT switching)
+        if (elements.icdTabContent) toggleSection(elements.icdTabContent, true);
+        if (elements.cptTabContent) toggleSection(elements.cptTabContent, false);
         if (elements.manualLookupIcd) toggleSection(elements.manualLookupIcd, true);
-        if (elements.manualLookupCpt) toggleSection(elements.manualLookupCpt, true);
-        // Only show AI panels when codes have been predicted
-        if (elements.aiPanelIcd) toggleSection(elements.aiPanelIcd, hasCodes);
-        if (elements.aiPanelCpt) toggleSection(elements.aiPanelCpt, hasCodes);
+        // CPT tab content hidden - handled by toggles in ICD content
+        // Always show AI panel in ICD tab (has toggle for ICD/CPT codes)
+        if (elements.aiPanelIcd) toggleSection(elements.aiPanelIcd, true);
+        // CPT AI panel hidden - handled by toggle in ICD panel
     }
 
     // Show/hide folder browser in review mode
@@ -295,6 +383,11 @@ function updatePageModeUI() {
     // Hide reset button in review mode
     if (elements.resetBtn) {
         toggleSection(elements.resetBtn, isPredictMode);
+    }
+    
+    // Update code search placeholder when manual lookup is visible
+    if (isReviewMode && state.selectedReviewFolder !== null) {
+        updateCodeSearchPlaceholder();
     }
     
     // Hide/show entire code sidebar
@@ -1167,9 +1260,21 @@ function clearCodes() {
     updatePageModeUI();
 }
 
+function resetAISuggestions() {
+    clearCodes();
+    setStatus("AI suggestions cleared. Ready for new prediction.", "success");
+}
+
 function renderCodes(codeType = "icd") {
     const codes = codeType === "icd" ? state.icdCodes : state.cptCodes;
-    const container = codeType === "icd" ? elements.codesContainer : elements.cptCodesContainer;
+    // In predict mode, if we're rendering CPT codes and the AI toggle is set to CPT,
+    // render in the ICD panel's codesContainer. Otherwise use the default containers.
+    let container;
+    if (state.pageMode === "predict" && codeType === "cpt" && state.aiSuggestedCodeType === "cpt") {
+        container = elements.codesContainer; // Render CPT codes in ICD panel container
+    } else {
+        container = codeType === "icd" ? elements.codesContainer : elements.cptCodesContainer;
+    }
     const selectedSet = codeType === "icd" ? state.selectedIcdCodeIds : state.selectedCptCodeIds;
 
     const filtered = codes.slice();
@@ -1298,6 +1403,16 @@ function renderCodes(codeType = "icd") {
 }
 
 function getCodeSearchElements(type) {
+    // In predict mode, always use the ICD search elements since only one lookup panel is visible
+    // In review mode, use separate elements for ICD and CPT
+    if (state.pageMode === "predict") {
+        return {
+            input: elements.searchInput,
+            results: elements.codeSearchResults,
+            addBtn: elements.codeSearchAddBtn,
+        };
+    }
+    // Review mode: use separate elements
     return type === "cpt"
         ? {
               input: elements.cptSearchInput,
@@ -1323,11 +1438,35 @@ function getCodeSystemForSearch(type) {
     if (type === "cpt") {
         return "cpt";
     }
-    return state.icdVersion === "10" ? "icd10" : "icd9";
+    // Use lookupIcdVersion for manual lookup searches
+    return state.lookupIcdVersion === "10" ? "icd10" : "icd9";
 }
 
 function isSearchTabActive(type) {
-    return type === "cpt" ? state.activeTab === "cpt" : state.activeTab === "icd";
+    // Use lookupCodeType in both predict and review modes
+    return type === "cpt" ? state.lookupCodeType === "cpt" : state.lookupCodeType === "icd";
+}
+
+function updateCodeSearchPlaceholder() {
+    // Update placeholder and hint text based on lookup code type (both predict and review modes)
+    if (!elements.searchInput) {
+        return;
+    }
+    
+    const codeType = state.lookupCodeType;
+    const hintText = elements.searchInput.parentElement?.parentElement?.querySelector(".code-search-hint");
+    
+    if (codeType === "icd") {
+        elements.searchInput.placeholder = `Look up an ICD code or description…`;
+        if (hintText) {
+            hintText.textContent = "Press Enter or Add to keep a code even if it's not found in the catalog.";
+        }
+    } else {
+        elements.searchInput.placeholder = `Look up a CPT code or description…`;
+        if (hintText) {
+            hintText.textContent = "Not listed? Press Enter or Add to capture the code exactly as you typed it.";
+        }
+    }
 }
 
 function updateCodeSearchAddState(type) {
@@ -1517,8 +1656,17 @@ function moveCodeSearchSelection(type, offset) {
 }
 
 function handleCodeSearchKeyDown(type, event) {
-    if ((type === "icd" && state.activeTab !== "icd") || (type === "cpt" && state.activeTab !== "cpt")) {
-        return;
+    // Check if the search type matches the active context
+    if (state.pageMode === "predict") {
+        // In predict mode, check against lookupCodeType
+        if ((type === "icd" && state.lookupCodeType !== "icd") || (type === "cpt" && state.lookupCodeType !== "cpt")) {
+            return;
+        }
+    } else {
+        // In review mode, check against activeTab
+        if ((type === "icd" && state.activeTab !== "icd") || (type === "cpt" && state.activeTab !== "cpt")) {
+            return;
+        }
     }
 
     const stateSlice = getCodeSearchState(type);
@@ -1565,11 +1713,11 @@ function addCodeFromSearchResult(type, result) {
         probability: null,
         type: codeType,
         spans: [],
-        icdVersion: codeType === "icd" ? state.icdVersion : null,
+        icdVersion: codeType === "icd" ? state.lookupIcdVersion : null,
     });
     if (state.finalizedCodes.length > priorLength) {
         if (codeType === "icd") {
-            setStatus(`Added ICD-${state.icdVersion} code ${result.code} from dictionary.`, "success");
+            setStatus(`Added ICD-${state.lookupIcdVersion} code ${result.code} from dictionary.`, "success");
         } else {
             setStatus(`Added CPT code ${result.code} from dictionary.`, "success");
         }
@@ -1591,11 +1739,11 @@ function addManualCodeFromSearch(type, rawCode) {
         probability: null,
         type: codeType,
         spans: [],
-        icdVersion: codeType === "icd" ? state.icdVersion : null,
+        icdVersion: codeType === "icd" ? state.lookupIcdVersion : null,
     });
     if (state.finalizedCodes.length > priorLength) {
         if (codeType === "icd") {
-            setStatus(`Added ICD-${state.icdVersion} code ${normalized}.`, "success");
+            setStatus(`Added ICD-${state.lookupIcdVersion} code ${normalized}.`, "success");
         } else {
             setStatus(`Added CPT code ${normalized}.`, "success");
         }
@@ -1678,7 +1826,7 @@ async function submitPrediction() {
     try {
         setStatus(useLLM ? "Running LLM prediction..." : "Running prediction...", "loading");
         setProcessing(true, "predict");
-        clearFinalizedCodes();
+        // Don't clear finalized codes - keep manually added codes
         clearCodes();
         renderNote();
 
@@ -2075,10 +2223,11 @@ function switchTab(tabType) {
         elements.cptTab.classList.toggle("active", tabType === "cpt");
     }
     
-    // Update tab content
+    // Tab buttons removed - both tab contents are always shown now
+    // Keep both tab contents visible
     if (elements.icdTabContent && elements.cptTabContent) {
-        elements.icdTabContent.classList.toggle("active", tabType === "icd");
-        elements.cptTabContent.classList.toggle("active", tabType === "cpt");
+        elements.icdTabContent.classList.add("active");
+        elements.cptTabContent.classList.add("active");
     }
     
     // Update visibility of ICD version toggle in lookup panel
@@ -2117,31 +2266,44 @@ function resetAll() {
 }
 
 function syncIcdVersionToggles() {
-    // Sync both toggles to match the current state
-    const isIcd10 = state.icdVersion === "10";
+    // Sync AI prediction toggle to match its state
     if (elements.icdVersionToggle) {
-        elements.icdVersionToggle.checked = isIcd10;
+        elements.icdVersionToggle.checked = state.icdVersion === "10";
     }
+    // Sync manual lookup toggle to match its state
     if (elements.lookupIcdVersionToggle) {
-        elements.lookupIcdVersionToggle.checked = isIcd10;
+        elements.lookupIcdVersionToggle.checked = state.lookupIcdVersion === "10";
     }
 }
 
-function handleIcdVersionChange(newVersion, sourceToggle) {
+function handleIcdVersionChange(newVersion) {
+    // Handle AI prediction ICD version change
     if (state.icdVersion === newVersion) {
         return;
     }
     
     state.icdVersion = newVersion;
     
-    // Sync both toggles (avoid recursive triggering)
-    if (sourceToggle !== elements.icdVersionToggle && elements.icdVersionToggle) {
-        elements.icdVersionToggle.checked = newVersion === "10";
+    // In predict mode, clear AI predicted codes and filter models
+    // Don't clear finalized codes - keep manually added codes
+    if (state.pageMode === "predict") {
+        filterAndPopulateModels();
+        clearCodes();
+        renderNote();
+        setStatus(
+            `Switched to ICD-${newVersion} for prediction. Model list updated.`,
+            "info"
+        );
     }
-    if (sourceToggle !== elements.lookupIcdVersionToggle && elements.lookupIcdVersionToggle) {
-        elements.lookupIcdVersionToggle.checked = newVersion === "10";
+}
+
+function handleLookupIcdVersionChange(newVersion) {
+    // Handle manual lookup ICD version change
+    if (state.lookupIcdVersion === newVersion) {
+        return;
     }
     
+    state.lookupIcdVersion = newVersion;
     resetCodeSearch("icd");
     
     // In review mode, only update the search dictionary and note rendering
@@ -2153,13 +2315,8 @@ function handleIcdVersionChange(newVersion, sourceToggle) {
             "info"
         );
     } else {
-        // In predict mode, clear codes and finalized codes as before
-        filterAndPopulateModels();
-        clearCodes();
-        clearFinalizedCodes();
-        renderNote();
         setStatus(
-            `Switched to ICD-${newVersion}. Model list updated.`,
+            `Switched to ICD-${newVersion} for manual lookup.`,
             "info"
         );
     }
@@ -2248,20 +2405,67 @@ function initEvents() {
         elements.icdVersionToggle.addEventListener("change", (event) => {
             // When checked (thumb on right) = ICD-10, when unchecked (thumb on left) = ICD-9
             const newVersion = event.target.checked ? "10" : "9";
-            handleIcdVersionChange(newVersion, event.target);
+            handleIcdVersionChange(newVersion);
         });
         // Initialize toggle state: ICD-9 = unchecked (thumb on left), ICD-10 = checked (thumb on right)
         elements.icdVersionToggle.checked = state.icdVersion === "10";
+    }
+    
+    if (elements.lookupCodeTypeToggle) {
+        elements.lookupCodeTypeToggle.addEventListener("change", (event) => {
+            // When checked (thumb on right) = CPT, when unchecked (thumb on left) = ICD
+            const newCodeType = event.target.checked ? "cpt" : "icd";
+            if (state.lookupCodeType !== newCodeType) {
+                state.lookupCodeType = newCodeType;
+                updatePageModeUI(); // Update visibility of ICD version toggle
+                resetCodeSearch(state.lookupCodeType === "icd" ? "cpt" : "icd"); // Clear search for the other type
+                updateCodeSearchPlaceholder();
+                updateCodeSearchAddState("icd");
+                updateCodeSearchAddState("cpt");
+                setStatus(
+                    `Switched to ${newCodeType.toUpperCase()} code lookup.`,
+                    "info"
+                );
+            }
+        });
+        // Initialize toggle state: ICD = unchecked (thumb on left), CPT = checked (thumb on right)
+        elements.lookupCodeTypeToggle.checked = state.lookupCodeType === "cpt";
+    }
+    
+    // AI Suggested Code Type Toggle (for switching between ICD and CPT in AI panel)
+    if (elements.aiCodeTypeToggle) {
+        elements.aiCodeTypeToggle.addEventListener("change", (event) => {
+            // When checked (thumb on right) = CPT, when unchecked (thumb on left) = ICD
+            const newCodeType = event.target.checked ? "cpt" : "icd";
+            if (state.aiSuggestedCodeType !== newCodeType) {
+                state.aiSuggestedCodeType = newCodeType;
+                // Update title
+                const titleElement = document.getElementById("aiSuggestedTitle-icd");
+                if (titleElement) {
+                    titleElement.textContent = newCodeType === "icd" 
+                        ? "AI Suggested ICD Codes" 
+                        : "AI Suggested CPT Codes";
+                }
+                // Re-render codes based on toggle
+                updatePageModeUI();
+                setStatus(
+                    `Switched to ${newCodeType.toUpperCase()} codes view.`,
+                    "success"
+                );
+            }
+        });
+        // Initialize toggle state: ICD = unchecked (thumb on left), CPT = checked (thumb on right)
+        elements.aiCodeTypeToggle.checked = state.aiSuggestedCodeType === "cpt";
     }
     
     if (elements.lookupIcdVersionToggle) {
         elements.lookupIcdVersionToggle.addEventListener("change", (event) => {
             // When checked (thumb on right) = ICD-10, when unchecked (thumb on left) = ICD-9
             const newVersion = event.target.checked ? "10" : "9";
-            handleIcdVersionChange(newVersion, event.target);
+            handleLookupIcdVersionChange(newVersion);
         });
         // Initialize toggle state: ICD-9 = unchecked (thumb on left), ICD-10 = checked (thumb on right)
-        elements.lookupIcdVersionToggle.checked = state.icdVersion === "10";
+        elements.lookupIcdVersionToggle.checked = state.lookupIcdVersion === "10";
     }
 
     if (elements.modeSelect) {
@@ -2271,7 +2475,7 @@ function initEvents() {
                 state.mode = newMode;
                 updateModeUI();
                 clearCodes();
-                clearFinalizedCodes();
+                //clearFinalizedCodes();
                 renderNote();
                 setStatus(
                     newMode === "llm"
@@ -2316,6 +2520,9 @@ function initEvents() {
     elements.resetBtn.addEventListener("click", resetAll);
     if (elements.clearFinalizedBtn) {
         elements.clearFinalizedBtn.addEventListener("click", clearFinalizedCodes);
+    }
+    if (elements.resetAISuggestionsBtn) {
+        elements.resetAISuggestionsBtn.addEventListener("click", resetAISuggestions);
     }
     if (elements.submitCodesBtn) {
         elements.submitCodesBtn.addEventListener("click", () => {
@@ -2405,25 +2612,39 @@ function initEvents() {
     });
 
     // Tab switching functionality
-    if (elements.icdTab) {
-        elements.icdTab.addEventListener("click", () => switchTab("icd"));
-    }
-    if (elements.cptTab) {
-        elements.cptTab.addEventListener("click", () => switchTab("cpt"));
-    }
+    // Tab buttons removed - functionality controlled by toggles
+    // if (elements.icdTab) {
+    //     elements.icdTab.addEventListener("click", () => switchTab("icd"));
+    // }
+    // if (elements.cptTab) {
+    //     elements.cptTab.addEventListener("click", () => switchTab("cpt"));
+    // }
 
     // Search event listeners
     if (elements.searchInput) {
-        elements.searchInput.addEventListener("input", (event) => handleCodeSearchInput("icd", event));
-        elements.searchInput.addEventListener("keydown", (event) => handleCodeSearchKeyDown("icd", event));
-        elements.searchInput.addEventListener("focus", () => handleCodeSearchFocus("icd"));
-        elements.searchInput.addEventListener("blur", () => handleCodeSearchBlur("icd"));
+        // Use lookupCodeType to determine which search to perform (both predict and review modes)
+        elements.searchInput.addEventListener("input", (event) => {
+            handleCodeSearchInput(state.lookupCodeType, event);
+        });
+        elements.searchInput.addEventListener("keydown", (event) => {
+            handleCodeSearchKeyDown(state.lookupCodeType, event);
+        });
+        elements.searchInput.addEventListener("focus", () => {
+            handleCodeSearchFocus(state.lookupCodeType);
+        });
+        elements.searchInput.addEventListener("blur", () => {
+            handleCodeSearchBlur(state.lookupCodeType);
+        });
+        // Initialize placeholder
+        updateCodeSearchPlaceholder();
     }
     if (elements.codeSearchAddBtn) {
         elements.codeSearchAddBtn.addEventListener("click", () => {
-            const { term } = getCodeSearchState("icd");
+            // Use lookupCodeType (both predict and review modes)
+            const searchType = state.lookupCodeType;
+            const { term } = getCodeSearchState(searchType);
             if (term.trim()) {
-                addManualCodeFromSearch("icd", term.trim());
+                addManualCodeFromSearch(searchType, term.trim());
             }
         });
     }

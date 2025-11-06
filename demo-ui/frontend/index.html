@@ -25,40 +25,6 @@
                         <option value="review">Review</option>
                     </select>
                 </label>
-                <label class="dropdown" id="icdVersionWrapper">
-                    <span>ICD Version</span>
-                    <div class="toggle-switch">
-                        <input type="checkbox" id="icdVersionToggle">
-                        <label for="icdVersionToggle">
-                            <span class="toggle-label-left">ICD-9</span>
-                            <span class="toggle-label-right">ICD-10</span>
-                        </label>
-                    </div>
-                </label>
-                <label class="dropdown" id="modeSelectWrapper">
-                    <span>Engine</span>
-                    <select id="modeSelect">
-                        <option value="local">Local Model</option>
-                        <option value="llm">LLM (OpenAI)</option>
-                    </select>
-                </label>
-                <label class="dropdown hidden" id="llmModelWrapper">
-                    <span>LLM Model</span>
-                    <select id="llmModelSelect"></select>
-                </label>
-                <label class="dropdown" id="modelSelectWrapper">
-                    <span>Model</span>
-                    <select id="modelSelect"></select>
-                </label>
-                <label class="dropdown" id="methodSelectWrapper">
-                    <span>Explainability</span>
-                    <select id="methodSelect"></select>
-                </label>
-                <label class="dropdown" id="thresholdWrapper">
-                    <span>Confidence ≥</span>
-                    <input id="thresholdInput" type="number" min="0" max="1" step="0.05" value="0.5">
-                </label>
-                <button id="submitBtn" class="primary-btn">Predict</button>
             </div>
         </header>
         <main class="app-main">
@@ -87,7 +53,7 @@
                 </div>
                 <div class="folder-browser hidden" id="folderBrowser">
                     <div class="folder-browser-header">
-                        <h2>Select Output Folder</h2>
+                        <h2>Select Admission Folder</h2>
                         <button id="refreshFoldersBtn" type="button" class="link-btn">Refresh</button>
                     </div>
                     <div class="folder-search-wrapper">
@@ -102,30 +68,40 @@
                     <p>choose from AI suggested codes and/or manually add your own.</p>
                 </div>
                 <div class="sidebar-section suggestions">
-                    <div class="code-tabs" id="codeTabs">
-                        <button id="icdTab" class="tab-button active" data-tab="icd">ICD Codes</button>
-                        <button id="cptTab" class="tab-button" data-tab="cpt">CPT Codes</button>
-                    </div>
                     <div id="icdTabContent" class="tab-content active">
                         <section class="lookup-panel" aria-labelledby="manualLookupTitle-icd">
                             <div class="method-header">
                                 <span class="method-icon" aria-hidden="true">🔎</span>
                                 <div>
                                     <h3 id="manualLookupTitle-icd">Manual Lookup</h3>
-                                    <p class="method-subtitle">Search the official ICD code set or add a custom code directly.</p>
+                                    <p class="method-subtitle">Search the official code set or add a custom code directly.</p>
                                 </div>
-                            </div>
-                            <div class="lookup-version-toggle-wrapper" id="lookupIcdVersionWrapper">
-                                <label class="dropdown">
-                                    <span>ICD Version</span>
-                                    <div class="toggle-switch">
-                                        <input type="checkbox" id="lookupIcdVersionToggle">
-                                        <label for="lookupIcdVersionToggle">
-                                            <span class="toggle-label-left">ICD-9</span>
-                                            <span class="toggle-label-right">ICD-10</span>
+                                <div class="lookup-header-toggles">
+                                    <div class="lookup-code-type-toggle-wrapper" id="lookupCodeTypeWrapper">
+                                        <label class="dropdown">
+                                            <span>Code Type</span>
+                                            <div class="toggle-switch">
+                                                <input type="checkbox" id="lookupCodeTypeToggle">
+                                                <label for="lookupCodeTypeToggle">
+                                                    <span class="toggle-label-left">ICD</span>
+                                                    <span class="toggle-label-right">CPT</span>
+                                                </label>
+                                            </div>
                                         </label>
                                     </div>
-                                </label>
+                                    <div class="lookup-version-toggle-wrapper hidden" id="lookupIcdVersionWrapper">
+                                        <label class="dropdown">
+                                            <span>ICD Version</span>
+                                            <div class="toggle-switch">
+                                                <input type="checkbox" id="lookupIcdVersionToggle">
+                                                <label for="lookupIcdVersionToggle">
+                                                    <span class="toggle-label-left">ICD-9</span>
+                                                    <span class="toggle-label-right">ICD-10</span>
+                                                </label>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
                             </div>
                             <div class="search-box">
                                 <div class="code-search-wrapper">
@@ -133,7 +109,7 @@
                                     <button id="codeSearchAddBtn" type="button" class="code-search-add-btn" disabled>Add</button>
                                     <div id="codeSearchResults" class="code-search-results hidden" role="listbox" aria-label="ICD code search results"></div>
                                 </div>
-                                <p class="code-search-hint">Press Enter or Add to keep a code even if it’s not found in the catalog.</p>
+                                <p class="code-search-hint">Press Enter or Add to keep a code even if it's not found in the catalog.</p>
                             </div>
                         </section>
                         <section class="ai-panel" aria-labelledby="aiSuggestedTitle-icd">
@@ -143,6 +119,56 @@
                                     <h3 id="aiSuggestedTitle-icd">AI Suggested ICD Codes</h3>
                                     <p class="method-subtitle">Review suggestions, explore highlights, then use the + button to send them to Finalized Codes.</p>
                                 </div>
+                                <div class="ai-header-actions hidden" id="aiHeaderActions">
+                                    <button id="resetAISuggestionsBtn" type="button" class="link-btn">Reset</button>
+                                    <div class="ai-code-type-toggle-wrapper hidden" id="aiCodeTypeToggleWrapper">
+                                        <label class="dropdown">
+                                            <div class="toggle-switch">
+                                                <input type="checkbox" id="aiCodeTypeToggle">
+                                                <label for="aiCodeTypeToggle">
+                                                    <span class="toggle-label-left">ICD</span>
+                                                    <span class="toggle-label-right">CPT</span>
+                                                </label>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="inference-controls" id="inferenceControls">
+                                <label class="dropdown" id="icdVersionWrapper">
+                                    <span>ICD Version</span>
+                                    <div class="toggle-switch">
+                                        <input type="checkbox" id="icdVersionToggle">
+                                        <label for="icdVersionToggle">
+                                            <span class="toggle-label-left">ICD-9</span>
+                                            <span class="toggle-label-right">ICD-10</span>
+                                        </label>
+                                    </div>
+                                </label>
+                                <label class="dropdown" id="modeSelectWrapper">
+                                    <span>Engine</span>
+                                    <select id="modeSelect">
+                                        <option value="local">Local Model</option>
+                                        <option value="llm">LLM (OpenAI)</option>
+                                    </select>
+                                </label>
+                                <label class="dropdown hidden" id="llmModelWrapper">
+                                    <span>LLM Model</span>
+                                    <select id="llmModelSelect"></select>
+                                </label>
+                                <label class="dropdown" id="modelSelectWrapper">
+                                    <span>Model</span>
+                                    <select id="modelSelect"></select>
+                                </label>
+                                <label class="dropdown" id="methodSelectWrapper">
+                                    <span>Explainability</span>
+                                    <select id="methodSelect"></select>
+                                </label>
+                                <label class="dropdown" id="thresholdWrapper">
+                                    <span>Confidence ≥</span>
+                                    <input id="thresholdInput" type="number" min="0" max="1" step="0.05" value="0.5">
+                                </label>
+                                <button id="submitBtn" class="primary-btn">Predict</button>
                             </div>
                             <div id="codesContainer" class="codes-container"></div>
                         </section>
@@ -224,4 +250,5 @@
     <script src="/ui/app.js?v=20241220-4" defer></script>
 </body>
 </html>
+
 

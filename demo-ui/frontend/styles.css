@@ -382,6 +382,29 @@ body {
     gap: 0.75rem;
 }
 
+.inference-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0;
+    margin-bottom: 0.75rem;
+}
+
+.inference-controls .dropdown {
+    margin: 0;
+}
+
+.inference-controls .dropdown select,
+.inference-controls .dropdown input[type="number"] {
+    min-width: 0;
+    width: 100%;
+}
+
+.inference-controls .primary-btn {
+    width: 100%;
+    margin-top: 0.25rem;
+}
+
 .sidebar-section + .sidebar-section {
     margin-top: 0.75rem;
 }
@@ -513,6 +536,8 @@ body {
     align-items: center;
     gap: 0.9rem;
     margin-bottom: 0.75rem;
+    position: relative;
+    flex-wrap: wrap;
 }
 
 .method-icon {
@@ -539,28 +564,74 @@ body {
     line-height: 1.4;
 }
 
-.lookup-version-toggle-wrapper {
-    margin: 0.75rem 0 1rem;
-    padding: 0.75rem 0;
-    border-top: 1px solid rgba(148, 163, 184, 0.15);
-    border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+.lookup-header-toggles {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-left: auto;
 }
 
+.lookup-code-type-toggle-wrapper,
+.lookup-version-toggle-wrapper {
+    margin: 0;
+    padding: 0;
+    border: none;
+}
+
+.lookup-code-type-toggle-wrapper .dropdown,
 .lookup-version-toggle-wrapper .dropdown {
     margin: 0;
     display: flex;
+    flex-direction: row;
     align-items: center;
-    justify-content: space-between;
-    width: 100%;
+    gap: 0.5rem;
 }
 
+.lookup-code-type-toggle-wrapper .dropdown > span,
 .lookup-version-toggle-wrapper .dropdown > span {
     font-size: 0.875rem;
     font-weight: 600;
     color: var(--text);
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
+.lookup-code-type-toggle-wrapper .toggle-switch,
 .lookup-version-toggle-wrapper .toggle-switch {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.ai-header-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 0;
+    padding: 0;
+}
+
+.ai-header-actions #resetAISuggestionsBtn {
+    margin: 0;
+}
+
+.ai-code-type-toggle-wrapper {
+    position: static;
+    margin: 0;
+    padding: 0;
+}
+
+.ai-code-type-toggle-wrapper .dropdown {
+    margin: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0;
+}
+
+.ai-code-type-toggle-wrapper .toggle-switch {
     margin: 0;
 }
 
