@@ -118,8 +118,8 @@ const elements = {
     cptTab: document.getElementById("cptTab"),
     icdTabContent: document.getElementById("icdTabContent"),
     cptTabContent: document.getElementById("cptTabContent"),
-    pageModeSelect: document.getElementById("pageModeSelect"),
-    pageModeWrapper: document.getElementById("pageModeWrapper"),
+    modeTabsContainer: document.querySelector(".mode-tabs"),
+    modeTabs: Array.from(document.querySelectorAll(".mode-tab")),
     appMain: document.querySelector(".app-main"),
     sidebar: document.querySelector(".sidebar"),
     inferenceControls: document.getElementById("inferenceControls"),
@@ -131,6 +131,7 @@ const elements = {
     folderBrowser: document.getElementById("folderBrowser"),
     folderList: document.getElementById("folderList"),
     refreshFoldersBtn: document.getElementById("refreshFoldersBtn"),
+    clearFoldersBtn: document.getElementById("clearFoldersBtn"),
     folderSearchInput: document.getElementById("folderSearchInput"),
     admissionIdWrapper: document.getElementById("admissionIdWrapper"),
     admissionIdInput: document.getElementById("admissionIdInput"),
@@ -154,6 +155,31 @@ function toggleSection(element, show) {
         return;
     }
     element.classList.toggle("hidden", !show);
+}
+
+function syncPageModeTabs() {
+    if (!elements.modeTabs || !elements.modeTabs.length) {
+        return;
+    }
+
+    const activeTab = elements.modeTabs.find(
+        (tab) => (tab.dataset.mode === "review" ? "review" : "predict") === state.pageMode
+    );
+
+    elements.modeTabs.forEach((tab) => {
+        const tabMode = tab.dataset.mode === "review" ? "review" : "predict";
+        const isActive = tabMode === state.pageMode;
+        tab.classList.toggle("active", isActive);
+        tab.setAttribute("aria-selected", isActive ? "true" : "false");
+        tab.setAttribute("tabindex", isActive ? "0" : "-1");
+    });
+
+    if (elements.modeTabsContainer) {
+        elements.modeTabsContainer.setAttribute(
+            "aria-activedescendant",
+            activeTab && activeTab.id ? activeTab.id : ""
+        );
+    }
 }
 
 function updateModeUI() {
@@ -189,6 +215,8 @@ function updateModeUI() {
 }
 
 function updatePageModeUI() {
+    syncPageModeTabs();
+
     const isReviewMode = state.pageMode === "review";
     const isPredictMode = !isReviewMode;
 
@@ -211,9 +239,6 @@ function updatePageModeUI() {
         }
     }
 
-    // Hide/show predict-related header controls
-    toggleSection(elements.pageModeWrapper, true); // Always show Mode toggle (predict/review)
-    
     // In predict mode: show local model controls only when not in LLM mode
     // This is now handled inside inferenceControls, so these toggles control visibility within the container
     const useLLM = state.mode === "llm";
@@ -414,6 +439,55 @@ function updatePageModeUI() {
         if (elements.appMain) {
             elements.appMain.classList.add("sidebar-hidden");
         }
+    }
+}
+
+function switchPageMode(newPageMode) {
+    const targetMode = newPageMode === "review" ? "review" : "predict";
+
+    if (state.pageMode === targetMode) {
+        syncPageModeTabs();
+        return;
+    }
+
+    state.pageMode = targetMode;
+    updatePageModeUI();
+
+    if (targetMode === "predict") {
+        clearCodes();
+        clearFinalizedCodes();
+        state.noteText = "";
+        state.originalNoteText = "";
+        state.noteFileName = null;
+        if (elements.noteInput) {
+            elements.noteInput.value = "";
+        }
+        renderNote();
+        updatePageModeUI();
+        updateSubmitCodesState();
+        setStatus("Switched to Predict mode.", "info");
+    } else {
+        clearCodes();
+        clearFinalizedCodes();
+        state.noteText = "";
+        state.originalNoteText = "";
+        state.noteFileName = null;
+        state.selectedReviewFolder = null;
+        state.loadedReviewData = null;
+        state.originalReviewCodes = null;
+        state.originalAdmissionId = null;
+        if (elements.admissionIdInput) {
+            elements.admissionIdInput.value = "";
+        }
+        renderNote();
+        state.folderSearchTerm = "";
+        if (elements.folderSearchInput) {
+            elements.folderSearchInput.value = "";
+        }
+        loadReviewFolders();
+        updateSubmitCodesState();
+        updatePageModeUI();
+        setStatus("Switched to Review mode. Select an output folder to load.", "info");
     }
 }
 
@@ -2323,64 +2397,39 @@ function handleLookupIcdVersionChange(newVersion) {
 }
 
 function initEvents() {
-    if (elements.pageModeSelect) {
-        elements.pageModeSelect.addEventListener("change", (event) => {
-            const newPageMode = event.target.value === "review" ? "review" : "predict";
-            if (state.pageMode !== newPageMode) {
-                state.pageMode = newPageMode;
-                updatePageModeUI();
-                // Clear state when switching modes
-                if (newPageMode === "predict") {
-                    // Switching to predict mode - clear review data if any
-                    clearCodes();
-                    clearFinalizedCodes();
-                    state.noteText = "";
-                    state.originalNoteText = "";
-                    state.noteFileName = null;
-                    if (elements.noteInput) {
-                        elements.noteInput.value = "";
+    if (elements.modeTabs && elements.modeTabs.length) {
+        const tabs = elements.modeTabs;
+        tabs.forEach((tab) => {
+            tab.addEventListener("click", () => {
+                const tabMode = tab.dataset.mode === "review" ? "review" : "predict";
+                switchPageMode(tabMode);
+            });
+            tab.addEventListener("keydown", (event) => {
+                if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                    event.preventDefault();
+                    const currentIndex = tabs.indexOf(tab);
+                    const direction = event.key === "ArrowRight" ? 1 : -1;
+                    const nextIndex = (currentIndex + direction + tabs.length) % tabs.length;
+                    const nextTab = tabs[nextIndex];
+                    if (nextTab) {
+                        nextTab.focus();
+                        const mode = nextTab.dataset.mode === "review" ? "review" : "predict";
+                        switchPageMode(mode);
                     }
-                    renderNote();
-                    updatePageModeUI(); // Update UI after clearing note state
-                } else {
-                    // Switching to review mode - clear predict data
-                    clearCodes();
-                    clearFinalizedCodes();
-                    state.noteText = "";
-                    state.originalNoteText = "";
-                    state.noteFileName = null;
-                    state.selectedReviewFolder = null;
-                    state.loadedReviewData = null;
-                    state.originalReviewCodes = null;
-                    state.originalAdmissionId = null;
-                    if (elements.admissionIdInput) {
-                        elements.admissionIdInput.value = "";
-                    }
-                    renderNote();
-                    // Clear folder search when switching to review mode
-                    state.folderSearchTerm = "";
-                    if (elements.folderSearchInput) {
-                        elements.folderSearchInput.value = "";
-                    }
-                    // Load folders when switching to review mode
-                    loadReviewFolders();
-                    updateSubmitCodesState(); // Update button state
                 }
-                setStatus(
-                    newPageMode === "review"
-                        ? "Switched to Review mode. Select an output folder to load."
-                        : "Switched to Predict mode.",
-                    "info"
-                );
-            }
+            });
         });
-        // Initialize page mode
-        elements.pageModeSelect.value = state.pageMode;
+        syncPageModeTabs();
     }
 
     if (elements.refreshFoldersBtn) {
         elements.refreshFoldersBtn.addEventListener("click", () => {
             loadReviewFolders();
+        });
+    }
+    if (elements.clearFoldersBtn) {
+        elements.clearFoldersBtn.addEventListener("click", () => {
+            deleteAllReviewFolders();
         });
     }
 
@@ -2795,6 +2844,23 @@ function renderFolderList() {
     });
 }
 
+function resetReviewWorkspace() {
+    state.selectedReviewFolder = null;
+    state.loadedReviewData = null;
+    state.noteText = "";
+    state.originalNoteText = "";
+    state.noteFileName = null;
+    state.finalizedCodes = [];
+    state.originalReviewCodes = null;
+    state.originalAdmissionId = null;
+    if (elements.admissionIdInput) {
+        elements.admissionIdInput.value = "";
+    }
+    renderNote();
+    renderFinalizedCodes();
+    updatePageModeUI();
+}
+
 async function deleteReviewFolder(folderName) {
     if (!folderName) {
         return;
@@ -2820,20 +2886,7 @@ async function deleteReviewFolder(folderName) {
         
         // If the deleted folder was selected, clear the selection
         if (state.selectedReviewFolder === folderName) {
-            state.selectedReviewFolder = null;
-            state.loadedReviewData = null;
-            state.noteText = "";
-            state.originalNoteText = "";
-            state.noteFileName = null;
-            state.finalizedCodes = [];
-            state.originalReviewCodes = null;
-            state.originalAdmissionId = null;
-            if (elements.admissionIdInput) {
-                elements.admissionIdInput.value = "";
-            }
-            renderNote();
-            renderFinalizedCodes();
-            updatePageModeUI();
+            resetReviewWorkspace();
         }
         
         // Reload folder list
@@ -2841,6 +2894,40 @@ async function deleteReviewFolder(folderName) {
         setStatus(`Folder "${folderName}" deleted successfully.`, "success");
     } catch (error) {
         setStatus(`Failed to delete folder: ${error.message}`, "error");
+    } finally {
+        setProcessing(false, "predict");
+    }
+}
+
+async function deleteAllReviewFolders() {
+    const folderCount = state.reviewFolders.length;
+    if (!folderCount) {
+        setStatus("No admissions to clear.", "info");
+        return;
+    }
+    
+    if (!confirm("This will remove all stored admissions. This action cannot be undone. Continue?")) {
+        return;
+    }
+    
+    try {
+        setStatus("Deleting all folders...", "loading");
+        setProcessing(true, "predict");
+        
+        const response = await fetch("/output-folders", {
+            method: "DELETE",
+        });
+        
+        if (!response.ok) {
+            const message = await response.text();
+            throw new Error(message || `Failed to delete folders: ${response.status}`);
+        }
+        
+        resetReviewWorkspace();
+        await loadReviewFolders();
+        setStatus("All admissions cleared.", "success");
+    } catch (error) {
+        setStatus(`Failed to delete all folders: ${error.message}`, "error");
     } finally {
         setProcessing(false, "predict");
     }
