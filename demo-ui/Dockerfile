@@ -2,21 +2,34 @@ FROM python:3.11.5-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UPSTREAM_API_BASE=http://localhost:8084
+    UPSTREAM_API_BASE=http://api:8084
 
 WORKDIR /app
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy and install Python dependencies for demo-ui
+COPY demo-ui/requirements.txt ./demo-ui/requirements.txt
+RUN pip install --no-cache-dir -r demo-ui/requirements.txt
 
-COPY . .
+# Copy the demo-ui directory
+COPY demo-ui ./demo-ui
+
+# Copy data directory for code descriptions
+# UI needs access to code description JSON files for search functionality
+COPY data ./data
+
+# Create output directory
+RUN mkdir -p demo-ui/output
+
+# Set working directory to demo-ui
+WORKDIR /app/demo-ui
 
 EXPOSE 8090
 
-CMD ["uvicorn", "demo-ui.main:app", "--host", "0.0.0.0", "--port", "8090"]
+# Run the demo-ui application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8090"]
 

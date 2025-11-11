@@ -70,7 +70,7 @@ class LlmPredictRequest(BaseModel):
 
 logger = logging.getLogger(__name__)
 
-BLACKLISTED_MODELS = {"roberta-base-pm-m3-voc-hf", "README.md"}
+BLACKLISTED_MODELS = {"roberta-base-pm-m3-voc-hf", "README.md", "cpt"}
 
 def discover_models() -> List[str]:
     """Return model directories suitable for selection in the UI."""
@@ -160,6 +160,16 @@ def list_models():
 def list_explain_methods():
     """Return supported explanation methods."""
     return {"methods": EXPLAIN_METHODS}
+
+
+@app.get("/healthz")
+def health_check():
+    """Health check endpoint for Docker and load balancers."""
+    return {
+        "status": "ok",
+        "roberta_found": roberta_found,
+        "default_model": default_model,
+    }
 
 
 if __name__ == "__main__":

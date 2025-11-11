@@ -56,11 +56,32 @@ Each run prints recall, precision, F1, and per-type recalls for diagnoses and pr
 
 ## Inference & Explanations & Coding Demo UI
 
+### Docker Compose Deployment (Recommended)
+
+Deploy both the API and Demo UI together using Docker Compose:
+
+```bash
+# Start all services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+```
+
+**Services:**
+- **API**: http://localhost:8084 (API docs at http://localhost:8084/docs)
+- **Demo UI**: http://localhost:8090
+
+See [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md) for detailed deployment instructions.
+
 ### FastAPI Service (`api.py`)
 
 Run the inference/explanation API either via Docker or locally.
 
-**Docker**
+**Docker (Single Container)**
 ```bash
 docker build -t explainable-medical-coding .
 docker run -d --name ml-service -p 8084:8084 explainable-medical-coding
@@ -85,12 +106,18 @@ python curl_api_test.py
 
 The demo UI is a lightweight FastAPI bridge plus static frontend that proxies requests to the upstream API so you can iterate quickly without reloading the heavy model stack.
 
+**Local Development:**
 1. **Start the upstream API** (Docker command above or `python api.py`)
 2. **Launch the UI bridge**:
    ```bash
    uvicorn demo-ui.main:app --reload --port 8090
    ```
-3. Visit `http://localhost:8090/` to use the interface. Drag-and-drop notes from `data/sample-notes/`, inspect AI-suggested codes with token highlights, curate a finalized list, and export results. Finalized outputs are written under `demo-ui/output/` in per-note folders.
+3. Visit `http://localhost:8090/` to use the interface.
+
+**Docker Compose:**
+The UI is automatically started with the API when using `docker-compose up -d`.
+
+Visit `http://localhost:8090/` to use the interface. Drag-and-drop notes from `data/sample-notes/`, inspect AI-suggested codes with token highlights, curate a finalized list, and export results. Finalized outputs are written under `demo-ui/output/` in per-note folders.
 
 ## Project Structure Highlights
 - `eval.py` - Evaluation script for LLM and PLM coding
