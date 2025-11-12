@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Set BUILD_MODELS=false to skip model downloads (faster build, LLM-only)
+        # Set BUILD_MODELS=true or omit to download models (slower build, enables PLM features)
+        BUILD_MODELS: ${BUILD_MODELS:-true}
     image: explainable-coding-api
     container_name: explainable-coding-api
     ports:

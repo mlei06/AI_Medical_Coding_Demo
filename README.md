@@ -102,21 +102,25 @@ The API will be available at `http://localhost:8084`
 
 ### Using Docker
 
-For a containerized setup, see [QUICKSTART_DOCKER.md](./QUICKSTART_DOCKER.md) for detailed instructions.
-
 Quick start:
 ```bash
 # Create .env file
 cp .env.example .env
 # Edit .env and add your OPENAI_API_KEY
 
-# Start services
-docker-compose up -d
+# Build and start services (models are downloaded automatically during build)
+docker-compose up -d --build
 
 # Access the application
 # Demo UI: http://localhost:8090
 # API: http://localhost:8084
 # API Docs: http://localhost:8084/docs
+```
+
+**Note**: Models are automatically downloaded during Docker build (first build takes 10-20 minutes). To skip model downloads for faster builds (LLM-only mode), set `BUILD_MODELS=false`:
+```bash
+BUILD_MODELS=false docker-compose build
+docker-compose up -d
 ```
 
 ## API Endpoints
