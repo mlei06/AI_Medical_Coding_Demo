@@ -41,6 +41,9 @@ RUN if [ "$BUILD_MODELS" = "true" ]; then \
 # Note: Models are downloaded above, not copied from local filesystem
 COPY . .
 
+# Expose port (can be overridden via PORT environment variable)
 EXPOSE 8084
 
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8084"]
+# Use PORT environment variable if provided (for platforms like Render, Railway)
+# Otherwise default to 8084
+CMD sh -c "uvicorn api:app --host 0.0.0.0 --port ${PORT:-8084}"
