@@ -29,7 +29,7 @@ RUN if [ "$BUILD_MODELS" = "true" ]; then \
     rm models/RoBERTa-base-PM-M3-Voc-hf.tar.gz && \
     mv models/RoBERTa-base-PM-M3-Voc/RoBERTa-base-PM-M3-Voc-hf models/roberta-base-pm-m3-voc-hf && \
     rm -rf models/RoBERTa-base-PM-M3-Voc && \
-    gdown --id 1ilNUITkGlGYWj4a_ZOaWbkOx2io6aPAq -O models/temp.tar.gz && \
+    gdown --id 1HCpT8BujdYFcvoS5jZLhEKhPv3f7VHEE -O models/temp.tar.gz && \
     tar -xzf models/temp.tar.gz -C models && \
     rm models/temp.tar.gz && \
     echo "Models downloaded successfully"; \
