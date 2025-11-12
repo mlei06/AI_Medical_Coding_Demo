@@ -95,7 +95,17 @@ def discover_models() -> List[str]:
         rel_path = Path("models") / path.relative_to(models_root)
         discovered.add(rel_path.as_posix())
 
-    return sorted(discovered)
+    sorted_discovered = sorted(discovered)
+
+    # Ensure supervised/public variants show up first for UI defaults
+    for idx, name in enumerate(sorted_discovered):
+        lowered = name.lower()
+        if "supervised" in lowered or "public" in lowered:
+            if idx != 0:
+                sorted_discovered[0], sorted_discovered[idx] = sorted_discovered[idx], sorted_discovered[0]
+            break
+
+    return sorted_discovered
 
 @app.post("/predict-explain")
 def predict_explain(body: PredictRequest):

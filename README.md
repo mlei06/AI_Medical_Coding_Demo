@@ -64,6 +64,10 @@ An evaluation and inference toolkit for explainable medical code prediction, com
    ```
 
    **Note**: Model downloads are optional. The system will work with LLM-based prediction without these models. However, PLM-based prediction requires the models to be downloaded.
+6. **Download Testing data** (only required if you want to evaluate on mimic data with eval.py)
+   gdown --id 1xqC10tyviXuU3iLVIjp7oH01RrimHW2- -O data/mimic_data/data.tar.gz
+   tar -xvzf data/data.tar.gz -C data/mimic_data
+   rm data/mimic_data/data.tar.gz
 
 ## Usage
 
@@ -108,7 +112,7 @@ Quick start:
 cp .env.example .env
 # Edit .env and add your OPENAI_API_KEY
 
-# Build and start services (models are downloaded automatically during build)
+# Build and start services
 docker-compose up -d --build
 
 # Access the application
@@ -122,6 +126,85 @@ docker-compose up -d --build
 BUILD_MODELS=false docker-compose build
 docker-compose up -d
 ```
+
+### Deploying Without Docker Compose
+
+For deployment platforms that don't support docker-compose, you can deploy the services separately:
+
+#### 1. Deploy API Service
+
+```bash
+# Build API image
+docker build -t explainable-coding-api .
+
+# Run API service
+docker run -d \
+  --name explainable-coding-api \
+  -p 8084:8084 \
+  --env-file .env \
+  explainable-coding-api
+```
+
+**Important**: Make sure your API service is accessible and note its URL (e.g., `http://localhost:8084` for local, or your production URL)
+
+#### 2. Deploy UI Service
+
+```bash
+# Build UI image
+docker build -f demo-ui/Dockerfile -t explainable-coding-ui .
+```
+
+**Local Docker Desktop (host port mapping)**  
+Use the host gateway to reach the API that you published on `localhost:8084`:
+
+```bash
+# Run UI service
+docker run -d \
+  --name explainable-coding-ui \
+  -p 8090:8090 \
+  -e UPSTREAM_API_BASE=http://host.docker.internal:8084 \
+  explainable-coding-ui
+```
+
+**Local user-defined network / docker compose**  
+If both containers share a Docker network (including the default network created by `docker compose`), point the UI directly at the API container:
+
+```bash
+docker network create explainable-coding
+
+docker run -d \
+  --name explainable-coding-api \
+  --network explainable-coding \
+  -p 8084:8084 \
+  --env-file .env \
+  explainable-coding-api
+
+docker run -d \
+  --name explainable-coding-ui \
+  --network explainable-coding \
+  -p 8090:8090 \
+  -e UPSTREAM_API_BASE=http://explainable-coding-api:8084 \
+  explainable-coding-ui
+```
+
+**Production deployment**  
+When the API lives behind a public URL (or another internal endpoint), configure the UI with that URL:
+
+```bash
+docker run -d \
+  --name explainable-coding-ui \
+  -p 8090:8090 \
+  -e UPSTREAM_API_BASE=https://your-api-service.com \
+  explainable-coding-ui
+```
+
+**Critical**: You **must** set the `UPSTREAM_API_BASE` environment variable to your API service URL. The UI service needs this to proxy requests to the API.
+
+**For Production Deployment:**
+- Replace the sample `UPSTREAM_API_BASE` value with your actual API service URL (e.g., `https://your-api-service.com`)
+- Set `UPSTREAM_API_BASE` as an environment variable in your platform's dashboard
+- Use the full URL with protocol (https:// for production)
+
 
 ## API Endpoints
 
@@ -171,4 +254,3 @@ See http://localhost:8084/docs for detailed API documentation.
 Models are stored in the `models/` directory. The system automatically discovers available models:
 - `roberta-base-pm-m3-voc-hf` - Base RoBERTa model (required for PLM prediction)
 - Additional models can be added to the `models/` directory
-
