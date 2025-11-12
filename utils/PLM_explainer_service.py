@@ -98,15 +98,26 @@ def convert_to_json_serializable(obj):
 
 @lru_cache(maxsize=4)
 def load_description_dict(path: Union[str, Path] = "data/description.json") -> Dict[str, str]:
-    """Load the ICD code description dictionary if available."""
+    """Load the code description dictionary if available."""
     try:
-        data = Path(path)
-        if not data.exists():
-            logger.warning("description.json not found at %s", data)
+        # Resolve path relative to current working directory (project root)
+        data_path = Path(path)
+        if not data_path.is_absolute():
+            data_path = Path.cwd() / data_path
+        data_path = data_path.resolve()
+        
+        if not data_path.exists():
+            logger.warning("Description file not found at %s", data_path)
             return {}
-        return json.loads(data.read_text(encoding="utf-8"))
+        
+        data = json.loads(data_path.read_text(encoding="utf-8"))
+        logger.info("Loaded %d code descriptions from %s", len(data), data_path)
+        return data
     except json.JSONDecodeError as exc:
-        logger.warning("Failed to parse description.json: %s", exc)
+        logger.warning("Failed to parse description file %s: %s", path, exc)
+        return {}
+    except Exception as exc:
+        logger.warning("Failed to load description file %s: %s", path, exc)
         return {}
 
 
@@ -467,8 +478,15 @@ def predict_explain(
     try:
         explainer = get_cached_explainer(model_path=model, device=None)
     except Exception as exc:
-        logger.exception("Failed to initialize explainer")
+        logger.exception("Failed to initialize ICD explainer")
         return {"error": str(exc)}
+
+    # Initialize CPT explainer - if it fails, log warning but continue with ICD only
+    cpt_explainer = None
+    try:
+        cpt_explainer = get_cached_explainer(model_path="models/cpt", device=None)
+    except Exception as exc:
+        logger.warning("Failed to initialize CPT explainer: %s. Continuing with ICD codes only.", exc)
 
     results = explainer.explain_predictions(
         text=text,
@@ -481,10 +499,31 @@ def predict_explain(
     if "error" in results:
         return results
 
+    # Run CPT predictions if explainer is available
+    cpt_results = None
+    if cpt_explainer is not None:
+        try:
+            cpt_results = cpt_explainer.explain_predictions(
+                text=text,
+                explanation_method=method,
+                top_k_codes=top_k_codes,
+                top_k_tokens=top_k_tokens,
+                return_spans=return_spans,
+            )
+        except Exception as exc:
+            logger.warning("Failed to get CPT predictions: %s. Continuing with ICD codes only.", exc)
+            cpt_results = None
+
     explanations = results.get("explanations", {})
     filtered = _filter_explanations_by_confidence(explanations, confidence_threshold)
     results["explanations"] = filtered
     results["num_predicted_codes"] = len(filtered)
+    
+    # Process CPT results if available
+    cpt_filtered = {}
+    if cpt_results is not None and "error" not in cpt_results:
+        cpt_explanations = cpt_results.get("explanations", {})
+        cpt_filtered = _filter_explanations_by_confidence(cpt_explanations, confidence_threshold)
     
     # Determine ICD version from model path
     model_path_lower = str(model).lower()
@@ -498,14 +537,26 @@ def predict_explain(
         logger.warning(
             "Could not determine ICD version from model path '%s'. "
             "Using icd9.json.",
-            model
+            model,
+            model_path_lower
         )
     
     description_dict = load_description_dict(description_path)
     icd_codes = _build_icd_response(filtered, description_dict)
-
+    
+    # Load CPT codes if we have CPT predictions
+    cpt_codes = []
+    if cpt_filtered:
+        cpt_description_dict = load_description_dict("data/code_descriptions/cpt.json")
+        if cpt_description_dict:
+            cpt_codes = _build_icd_response(cpt_filtered, cpt_description_dict)
+        else:
+            logger.warning("CPT description dictionary is empty. CPT codes will have no descriptions.")
+            # Still build response with empty descriptions
+            cpt_codes = _build_icd_response(cpt_filtered, {})
+    
     formatted_results = {
-        "cpt_codes": None,
+        "cpt_codes": cpt_codes if cpt_codes else None,
         "icd_codes": icd_codes,
     }
 

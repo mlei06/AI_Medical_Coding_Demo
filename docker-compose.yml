@@ -1,0 +1,53 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Set BUILD_MODELS=false to skip model downloads (faster build, LLM-only)
+        # Set BUILD_MODELS=true or omit to download models (slower build, enables PLM features)
+        BUILD_MODELS: ${BUILD_MODELS:-true}
+    image: explainable-coding-api
+    container_name: explainable-coding-api
+    ports:
+      - "8084:8084"
+    env_file:
+      - .env
+    # Models and data are included in the image (self-contained)
+    # No volume mounts needed for API service
+    # Health check to ensure API is ready before UI starts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8084/healthz').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ui:
+    build:
+      context: .
+      dockerfile: demo-ui/Dockerfile
+    image: explainable-coding-ui
+    container_name: explainable-coding-ui
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8090:8090"
+    environment:
+      - UPSTREAM_API_BASE=http://api:8084
+    volumes:
+      # Mount output directory to persist results on host
+      - ./demo-ui/output:/app/demo-ui/output
+    # Data directory is included in UI image (for code descriptions)
+    # No need to mount data/ as volume
+    env_file:
+      - .env
+    # Health check for UI service
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/healthz').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+

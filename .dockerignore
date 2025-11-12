@@ -1,0 +1,51 @@
+# Exclude development files
+.git/
+.gitignore
+*.md
+!README.md
+
+# Exclude Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Exclude IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Exclude environment files
+.env
+.env.local
+venv/
+env/
+
+# Exclude output directories
+demo-ui/output/
+*.log
+
+# Exclude test files
+*.test
+test/
+tests/
+
+# Exclude documentation (except README)
+docs/
+DOCKER_DEPLOYMENT.md
+QUICKSTART_DOCKER.md
+VOLUME_MOUNT_EXPLANATION.md
+
+# Exclude large evaluation data files (keep code_descriptions/)
+# These are large CSV files that aren't needed in the image
+data/mimic_data/
+data/sample-notes/
+

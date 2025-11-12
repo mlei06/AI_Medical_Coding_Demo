@@ -531,3 +531,29 @@ async def delete_output_folder(folder_name: str) -> Dict[str, Any]:
         return {"message": f"Folder '{sanitized_name}' deleted successfully."}
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete folder: {str(e)}")
+
+
+@app.delete("/output-folders")
+async def delete_all_output_folders() -> Dict[str, Any]:
+    """Delete all output folders and their contents."""
+    if not OUTPUT_DIR.exists():
+        return {"message": "No folders to delete.", "deleted": 0}
+    
+    deleted = 0
+    errors = []
+    for item in OUTPUT_DIR.iterdir():
+        if item.is_dir():
+            try:
+                shutil.rmtree(item)
+                deleted += 1
+            except OSError as exc:
+                errors.append(f"{item.name}: {exc}")
+    
+    if errors:
+        joined = "; ".join(errors)
+        raise HTTPException(status_code=500, detail=f"Failed to delete some folders: {joined}")
+    
+    return {
+        "message": f"Deleted {deleted} folder{'s' if deleted != 1 else ''}.",
+        "deleted": deleted,
+    }

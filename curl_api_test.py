@@ -22,7 +22,7 @@ from typing import Any, List, Optional
 SCRIPT_DIR = Path(__file__).resolve().parent
 MODELS_ROOT = SCRIPT_DIR / "models"
 DISPLAY_ROOT = Path("models")
-BLACKLISTED_MODELS = {"roberta-base-pm-m3-voc-hf"}
+BLACKLISTED_MODELS = {"roberta-base-pm-m3-voc-hf", "cpt"}
 
 DEFAULT_NOTE = (
 """
@@ -267,17 +267,51 @@ def display_results(result: dict) -> None:
                         print(f"  {text}")
 
     cpt_codes = result.get("cpt_codes") or []
-    if cpt_codes:
+    if not cpt_codes:
+        print("\nNo CPT codes returned.")
+    else:
         print("\nCPT Codes:")
+        # Check if CPT codes have the same structure as ICD codes (PLM) or LLM structure
+        is_llm_payload = any("evidence_spans" in entry for entry in cpt_codes)
+        
         for entry in cpt_codes:
             code = entry.get("code", "<unknown>")
             description = entry.get("description") or ""
-            explanation = entry.get("explanation") or ""
+            probability = entry.get("probability")
+            probability_text = (
+                f"{probability:.4f}" if isinstance(probability, (float, int)) else "n/a"
+            )
+            
             print(f"\nCode: {code}")
             print(f"Description: {description}")
-            if explanation:
-                print(f"Explanation: {explanation}")
-            spans = entry.get("evidence_spans") or []
+            if not is_llm_payload:
+                print(f"Probability: {probability_text}")
+            
+            if is_llm_payload:
+                explanation = entry.get("explanation") or ""
+                if explanation:
+                    print(f"Explanation: {explanation}")
+                spans = entry.get("evidence_spans") or []
+            else:
+                explanation = entry.get("explanation") or {}
+                spans = explanation.get("spans") or []
+                tokens = explanation.get("tokens") or []
+                if tokens:
+                    print("Top tokens:")
+                    for token_info in tokens:
+                        rank = token_info.get("rank")
+                        display_rank = (
+                            f"{int(rank)}." if isinstance(rank, (int, float)) else "-"
+                        )
+                        token = token_info.get("token", "<unk>")
+                        attribution = token_info.get("attribution")
+                        attr_text = (
+                            f"{attribution:.4f}"
+                            if isinstance(attribution, (float, int))
+                            else "n/a"
+                        )
+                        print(f"  {display_rank} {token} ({attr_text})")
+            
             if spans:
                 print("Evidence spans:")
                 for span in spans:
