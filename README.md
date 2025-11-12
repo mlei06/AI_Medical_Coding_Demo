@@ -4,14 +4,53 @@ An evaluation and inference toolkit for explainable medical code prediction, com
 
 ## Features
 
-- **Evaluation Harness**: `eval.py` guides LLM and PLM scoring with recall/precision metrics and optional dataset subsetting.
-- **Explainable Inference**: FastAPI service exposes prediction and attribution APIs for ICD-9 and CPT codes.
-- **Interactive Tooling**: Demo UI and cURL helper streamline manual review and experimentation.
-- **Attribution Insights**: Token-level importance scores with accompanying confidence estimates.
+- **Medical Code Prediction**: Predict ICD-9, ICD-10, and CPT codes from clinical notes
+- **Multiple Model Support**: 
+  - Local PLM (Pre-trained Language Model) models with explainability methods
+  - LLM-based prediction using OpenAI models (GPT-5, etc.)
+- **Explainability**: Visualize evidence spans and explanations for predicted codes
+- **Interactive UI**: Web-based interface for code prediction, review, and management
+- **Evidence Highlighting**: See exactly which parts of the clinical note support each code
+- **Code Management**: Save, review, and edit predicted codes with full audit trails
 
 ## Setup
 
-1. **Download models**  (optional if you only want to use LLM)
+### Prerequisites
+
+- Python 3.11+
+- pip
+- wget (for downloading models)
+- gdown (for downloading models from Google Drive)
+
+### Installation
+
+1. **Clone the repository** (if not already done)
+
+2. **Create and activate a virtual environment** (recommended):
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Set up environment variables**:
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your OPENAI_API_KEY
+   ```
+   
+   The `.env` file should contain:
+   ```env
+   OPENAI_API_KEY=your_openai_api_key_here
+   ```
+   
+   **Note**: The OpenAI API key is only required if you want to use LLM-based prediction. If you only use local PLM models, you can skip this step.
+
+5. **Download models** (optional if you only want to use LLM):
    ```bash
    wget https://dl.fbaipublicfiles.com/biolm/RoBERTa-base-PM-M3-Voc-hf.tar.gz -P models
    tar -xvzf models/RoBERTa-base-PM-M3-Voc-hf.tar.gz -C models
@@ -24,104 +63,142 @@ An evaluation and inference toolkit for explainable medical code prediction, com
    rm models/temp.tar.gz
    ```
 
-2. **Install dependencies (local workflow)**  
-   ```bash
-   python -m venv venv
-   source venv/bin/activate          # Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+   **Note**: Model downloads are optional. The system will work with LLM-based prediction without these models. However, PLM-based prediction requires the models to be downloaded.
 
-3. **Environment variables**
-   if you wish to use LLM for coding
-   - copy .env.example to .env and provide openai api key
+## Usage
 
-## Evaluation Workflow (`eval.py`)
+### Running the API Server
 
-Use `eval.py` to evaluate LLM and PLM on a chosen dataset and also create smaller datasets out of existing ones.
-
-```bash
-python eval.py
-```
-
-The script guides you through:
-
-- **Optional subset creation** – create persistent CSV subsets to control evaluation size.
-- **Dataset selection** – choose from CSVs discovered under `data/`.
-- **Evaluation mode**
-  - `LLM`: Calls `predict_codes_with_llm` (requires `OPENAI_API_KEY`).
-  - `PLM`: Uses a locally stored PLM model; you will be prompted to pick a model directory and confidence threshold.
-  - `Both`: Runs both evaluations sequentially.
-
-Each run prints recall, precision, F1, and per-type recalls for diagnoses and procedures. Subsets created through the prompts are saved alongside the original data for reuse.
-
-## Inference & Explanations & Coding Demo UI
-
-### Docker Compose Deployment (Recommended)
-
-Deploy both the API and Demo UI together using Docker Compose:
-
-```bash
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
-```
-
-**Services:**
-- **API**: http://localhost:8084 (API docs at http://localhost:8084/docs)
-- **Demo UI**: http://localhost:8090
-
-See [DOCKER_DEPLOYMENT.md](./DOCKER_DEPLOYMENT.md) for detailed deployment instructions.
-
-### FastAPI Service (`api.py`)
-
-Run the inference/explanation API either via Docker or locally.
-
-**Docker (Single Container)**
-```bash
-docker build -t explainable-medical-coding .
-docker run -d --name ml-service -p 8084:8084 explainable-medical-coding
-```
-
-**Local Development (Python 3.11.5)**
+Start the main API server:
 ```bash
 python api.py
 ```
 
-The service is available at `http://localhost:8084`; visit `/docs` for interactive OpenAPI documentation.
-
-### Interactive cURL helper (`curl_api_test.py`)
-
-This script prompts you to choose a model directory and explainability method, gathers note text (or uses a built-in sample), and issues a `/predict-explain` request via `curl`. The response is formatted with codes, descriptions, and top tokens.
-
+Or using uvicorn directly:
 ```bash
-python curl_api_test.py
+uvicorn api:app --host 0.0.0.0 --port 8084
 ```
 
-### Assisted medical coder demo UI (`demo-ui/`)
+The API will be available at `http://localhost:8084`
+- API Documentation: http://localhost:8084/docs
+- Health Check: http://localhost:8084/healthz
 
-The demo UI is a lightweight FastAPI bridge plus static frontend that proxies requests to the upstream API so you can iterate quickly without reloading the heavy model stack.
+### Running the Demo UI
 
-**Local Development:**
-1. **Start the upstream API** (Docker command above or `python api.py`)
-2. **Launch the UI bridge**:
+1. **Start the main API server** (see above) on `http://localhost:8084`
+
+2. **Install UI dependencies** (if not already installed):
    ```bash
-   uvicorn demo-ui.main:app --reload --port 8090
+   pip install -r demo-ui/requirements.txt
    ```
-3. Visit `http://localhost:8090/` to use the interface.
 
-**Docker Compose:**
-The UI is automatically started with the API when using `docker-compose up -d`.
+3. **Start the UI server**:
+   ```bash
+   cd demo-ui
+   uvicorn main:app --reload --port 8090
+   ```
 
-Visit `http://localhost:8090/` to use the interface. Drag-and-drop notes from `data/sample-notes/`, inspect AI-suggested codes with token highlights, curate a finalized list, and export results. Finalized outputs are written under `demo-ui/output/` in per-note folders.
+4. **Access the UI**: Visit http://localhost:8090
 
-## Project Structure Highlights
-- `eval.py` - Evaluation script for LLM and PLM coding
-- `api.py` – FastAPI application exposing `/predict-explain`, `/models`, and `/explain-methods`.
-- `curl_api_test.py` – Interactive command-line tester for the API.
-- `demo-ui/` – Self-contained proxy UI (FastAPI bridge + static frontend assets).
-- `models/` – Expected location for downloaded model checkpoints.
+### Using Docker
+
+For a containerized setup, see [QUICKSTART_DOCKER.md](./QUICKSTART_DOCKER.md) for detailed instructions.
+
+Quick start:
+```bash
+# Create .env file
+cp .env.example .env
+# Edit .env and add your OPENAI_API_KEY
+
+# Start services
+docker-compose up -d
+
+# Access the application
+# Demo UI: http://localhost:8090
+# API: http://localhost:8084
+# API Docs: http://localhost:8084/docs
+```
+
+## API Endpoints
+
+### Prediction Endpoints
+
+- `POST /predict-explain` - Predict codes using PLM models with explainability
+- `POST /predict-explain-llm` - Predict codes using LLM models
+
+### Information Endpoints
+
+- `GET /models` - List available models
+- `GET /explain-methods` - List available explanation methods
+- `GET /healthz` - Health check endpoint
+
+See http://localhost:8084/docs for detailed API documentation.
+
+## Project Structure
+
+```
+.
+├── api.py                 # Main API server
+├── demo-ui/              # Demo UI application
+│   ├── main.py          # UI server
+│   ├── frontend/        # Frontend assets
+│   └── output/          # Saved outputs
+├── utils/                # Utility modules
+│   ├── PLM_explainer_service.py  # PLM-based prediction service
+│   └── llm_explainer.py          # LLM-based prediction service
+├── models/               # Model files (downloaded)
+├── data/                 # Data files
+│   ├── code_descriptions/  # Code description files
+│   └── sample-notes/       # Sample clinical notes
+└── requirements.txt      # Python dependencies
+```
+
+## Configuration
+
+### Environment Variables
+
+- `OPENAI_API_KEY` - OpenAI API key for LLM-based prediction (required for LLM features)
+- `LLM_CODING_MODEL` - LLM model to use (default: "gpt-5")
+- `GPT5_DEFAULT_REASONING_EFFORT` - Reasoning effort for GPT-5 models (default: "minimal")
+- `UPSTREAM_API_BASE` - Upstream API base URL for UI (default: "http://localhost:8084")
+
+### Model Configuration
+
+Models are stored in the `models/` directory. The system automatically discovers available models:
+- `roberta-base-pm-m3-voc-hf` - Base RoBERTa model (required for PLM prediction)
+- Additional models can be added to the `models/` directory
+
+## Troubleshooting
+
+### Models not found
+
+If you see errors about models not being found:
+1. Ensure models are downloaded (see Setup step 5)
+2. Check that `models/roberta-base-pm-m3-voc-hf` exists
+3. Verify model files are not corrupted
+
+### OpenAI API errors
+
+If LLM prediction fails:
+1. Check that `OPENAI_API_KEY` is set in `.env`
+2. Verify the API key is valid and has sufficient credits
+3. Check network connectivity
+
+### UI can't connect to API
+
+1. Ensure the API server is running on `http://localhost:8084`
+2. Check the `UPSTREAM_API_BASE` environment variable in the UI server
+3. Verify both services are accessible
+
+## License
+
+[Add your license information here]
+
+## Contributing
+
+[Add contributing guidelines here]
+
+## References
+
+- RoBERTa-base-PM-M3-Voc model: [BioLM](https://github.com/facebookresearch/biolm)
+
